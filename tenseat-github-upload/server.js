@@ -1007,6 +1007,39 @@ async function ensureData() {
     chirin.mustChangePassword = false;
     restaurantsChanged = true;
   }
+
+  let restaurantA = restaurants.find(function (restaurant) { return restaurant.slug === "restaurant-a"; });
+  if (!restaurantA) {
+    const passwordFields = await passwordRecord("RestaurantA123");
+    restaurantA = {
+      id: "restaurant-a-demo",
+      slug: "restaurant-a",
+      name: "Restaurant A",
+      ownerEmail: "restaurant.a@example.com",
+      passwordSalt: passwordFields.passwordSalt,
+      passwordHash: passwordFields.passwordHash,
+      address: "123 Sample Street, Adelaide SA",
+      googleMapsQuery: "Adelaide Central Market Adelaide",
+      openingTime: "11:30",
+      closingTime: "21:00",
+      servicePeriods: [
+        { openingTime: "11:30", closingTime: "14:30" },
+        { openingTime: "17:00", closingTime: "21:00" }
+      ],
+      maxPartySize: 20,
+      timeSlotCapacity: 30,
+      plan: "TenSeat Basic",
+      priceMonthly: 10,
+      currency: "AUD",
+      subscriptionStatus: "trialing",
+      mustChangePassword: false,
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    restaurants.push(restaurantA);
+    restaurantsChanged = true;
+  }
+
   restaurants.forEach(function (restaurant) {
     const periods = servicePeriodsFor(restaurant);
     if (!Array.isArray(restaurant.servicePeriods) || !restaurant.servicePeriods.length) {

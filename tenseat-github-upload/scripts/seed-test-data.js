@@ -5,18 +5,21 @@ const BOOKING_DATE = process.env.TEST_BOOKING_DATE || tomorrowDate();
 
 const fixtures = [
   {
-    slug: "test-cafe",
-    name: "Test Cafe",
-    email: "test.cafe@example.com",
-    password: "TestCafe123",
-    address: "Sydney Opera House, Sydney NSW",
-    googleMapsQuery: "Sydney Opera House Sydney",
+    slug: "restaurant-a",
+    name: "Restaurant A",
+    email: "restaurant.a@example.com",
+    password: "RestaurantA123",
+    address: "123 Sample Street, Adelaide SA",
+    googleMapsQuery: "Adelaide Central Market Adelaide",
     maxPartySize: 20,
     timeSlotCapacity: 30,
-    servicePeriods: [{ openingTime: "11:30", closingTime: "14:30" }],
+    servicePeriods: [
+      { openingTime: "11:30", closingTime: "14:30" },
+      { openingTime: "17:00", closingTime: "21:00" }
+    ],
     bookings: [
-      { firstName: "Ava", lastName: "Smith", phone: "0400 111 222", time: "12:10", partySize: 2, notes: "Window seat" },
-      { firstName: "Noah", lastName: "Lee", phone: "0400 333 444", time: "13:45", partySize: 4, notes: "Birthday" }
+      { firstName: "Ava", lastName: "Brown", phone: "0400 111 222", time: "12:10", partySize: 2, notes: "Window seat" },
+      { firstName: "Noah", lastName: "Wilson", phone: "0400 333 444", time: "18:45", partySize: 4, notes: "Birthday" }
     ]
   },
   {

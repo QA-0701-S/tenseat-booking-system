@@ -9,14 +9,14 @@ npm install
 npm start
 ```
 
-- Chirin guest booking page: `http://127.0.0.1:8795/r/chirin`
+- Restaurant A guest booking page: `http://127.0.0.1:8795/r/restaurant-a`
 - TenSeat official homepage: `http://127.0.0.1:8795/`
 - Restaurant login and registration: `http://127.0.0.1:8795/owner`
 
-## Chirin Starter Account
+## Demo Restaurant Account
 
-- Email: `chirin.food191@gmail.com`
-- Temporary password: `Chirin1919!`
+- Email: `restaurant.a@example.com`
+- Temporary password: `RestaurantA123`
 
 The dashboard warns the owner to change this default password. Before real use, replace it with a password only the restaurant knows.
 
@@ -27,7 +27,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Guests choose date, last name, first name, required phone number, party size, notes, and a 24-hour time inside the restaurant service periods.
 - Restaurants can set one or two service periods, such as lunch `11:30-14:30` and dinner `17:00-21:00`.
 - Each restaurant booking page updates the Google Maps embed from the dashboard address or Google Maps search text.
-- Maximum party size is configurable. Chirin defaults to 20 guests.
+- Maximum party size is configurable. Restaurant A defaults to 20 guests.
 - Capacity at the same exact time is configurable, and the system blocks overbooking.
 - Guests receive an on-screen booking code and are prompted to copy it.
 - Guests can cancel by booking code.
@@ -75,19 +75,19 @@ DATA_DIR=/var/data/tenseat
 3. If Render detects `render.yaml`, create the service from that blueprint.
 4. Set `PUBLIC_ORIGIN` to the final site URL.
 5. Use a persistent disk if you want JSON data to survive redeploys. Mount it at `/var/data/tenseat`.
-6. Test `/r/chirin` for guest bookings and `/owner` for the restaurant dashboard.
+6. Test `/r/restaurant-a` for guest bookings and `/owner` for the restaurant dashboard.
 7. Change the starter password, then add the restaurant booking link to Google Business Profile.
 
 ## Test Data
 
 The seed script creates two test restaurants:
 
-- `http://127.0.0.1:8795/r/test-cafe`: one service period, map location Sydney Opera House.
+- `http://127.0.0.1:8795/r/restaurant-a`: two service periods, sample Restaurant A profile.
 - `http://127.0.0.1:8795/r/split-shift-bistro`: two service periods, map location Adelaide Central Market.
 
 Test dashboard accounts:
 
-- `test.cafe@example.com` / `TestCafe123`
+- `restaurant.a@example.com` / `RestaurantA123`
 - `split.bistro@example.com` / `SplitBistro123`
 
 Create local test data:

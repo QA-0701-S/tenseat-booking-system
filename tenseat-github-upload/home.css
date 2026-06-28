@@ -497,8 +497,8 @@ a {
 .pricing-section {
   width: min(1120px, calc(100% - 36px));
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 1fr;
+  align-items: start;
   gap: 28px;
   margin: 96px auto 0;
   padding: 42px;
@@ -507,13 +507,90 @@ a {
   border-radius: 8px;
 }
 
-.pricing-section .eyebrow,
-.pricing-section p {
+.pricing-section .eyebrow {
   color: rgba(255, 255, 255, 0.78);
 }
 
-.pricing-section p {
+.pricing-intro p {
   max-width: 650px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.pricing-tiers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tier-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tier-card h3 {
+  margin: 0;
+  color: #ffffff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.1rem, 5vw, 3.2rem);
+  line-height: 1;
+}
+
+.tier-card h3 small {
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.tier-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  line-height: 1.55;
+  font-weight: 720;
+}
+
+.tier-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tier-card li {
+  position: relative;
+  padding-left: 22px;
+  color: rgba(255, 255, 255, 0.84);
+  line-height: 1.45;
+  font-size: 0.94rem;
+  font-weight: 680;
+}
+
+.tier-card li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.tier-label {
+  color: var(--amber);
+  font-size: 0.8rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.pro-tier {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .dark-action {
@@ -569,6 +646,7 @@ a {
   .proof-band,
   .feature-grid,
   .sample-grid,
+  .pricing-tiers,
   .workflow,
   .story-section,
   .pricing-section {
