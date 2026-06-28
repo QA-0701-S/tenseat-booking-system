@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,7 +8,7 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="map-panel" aria-label="餐馆地图">
+      <section class="map-panel" aria-label="Restaurant map">
         <div class="map-frame">
           <iframe id="googleMap" title="Google Maps" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
           <div class="map-overlay">
@@ -17,12 +17,12 @@
               <h1 id="restaurantName">Loading...</h1>
               <p id="restaurantAddress"></p>
             </div>
-            <a id="openMaps" class="icon-button map-link" href="#" target="_blank" rel="noreferrer" aria-label="在 Google Maps 打开"><span aria-hidden="true">↗</span></a>
+            <a id="openMaps" class="icon-button map-link" href="#" target="_blank" rel="noreferrer" aria-label="Open in Google Maps"><span aria-hidden="true">&#8599;</span></a>
           </div>
         </div>
       </section>
 
-      <section class="booking-panel" aria-label="Make Booking">
+      <section class="booking-panel" aria-label="Make booking">
         <header class="panel-header">
           <div>
             <p class="eyebrow">TENSEAT</p>
@@ -33,87 +33,97 @@
 
         <form id="bookingForm" class="booking-form simple-booking">
           <label class="field date-booking-field">
-            <span>日期</span>
+            <span>Date</span>
             <input id="bookingDate" name="date" type="date" required />
           </label>
 
+          <div class="guest-fields">
+            <label class="field">
+              <span>Last name</span>
+              <input id="bookingLastName" name="lastName" type="text" autocomplete="family-name" maxlength="80" required />
+            </label>
+            <label class="field">
+              <span>First name</span>
+              <input id="bookingFirstName" name="firstName" type="text" autocomplete="given-name" maxlength="80" required />
+            </label>
+          </div>
+
           <label class="field">
-            <span>姓名</span>
-            <input id="bookingName" name="name" type="text" autocomplete="name" maxlength="80" required />
+            <span>Phone</span>
+            <input id="bookingPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="30" required />
           </label>
 
           <label class="field">
-            <span>人数</span>
+            <span>Party size</span>
             <select id="partySize" name="partySize" required></select>
           </label>
 
           <label class="field">
-            <span>备注（可选）</span>
-            <textarea id="bookingNotes" name="notes" maxlength="300" rows="3" placeholder="过敏、生日、儿童椅、靠窗等"></textarea>
+            <span>Notes (optional)</span>
+            <textarea id="bookingNotes" name="notes" maxlength="300" rows="3" placeholder="Allergies, birthday, high chair, window seat"></textarea>
           </label>
 
           <div class="slot-block time-block">
             <div class="section-title">
-              <h3>时间</h3>
-              <span id="timeRange">--:--–--:--</span>
+              <h3>Time</h3>
+              <span id="timeRange">--:--</span>
             </div>
             <div class="time-picker-24">
               <label class="field">
-                <span>小时（24h）</span>
+                <span>Hour (24h)</span>
                 <select id="bookingHour" required><option value="">--</option></select>
               </label>
               <span class="time-separator" aria-hidden="true">:</span>
               <label class="field">
-                <span>分钟</span>
+                <span>Minute</span>
                 <select id="bookingMinute" required>
                   <option value="">--</option>
                 </select>
               </label>
               <input id="bookingTime" name="time" type="hidden" />
             </div>
-            <p class="helper-text" id="timeStatus">请选择 11:30 到 14:30 之间的任意时间</p>
+            <p class="helper-text" id="timeStatus">Choose any time between 11:30 and 14:30</p>
           </div>
 
-          <div class="summary-strip" id="bookingSummary">请选择人数和时间</div>
+          <div class="summary-strip" id="bookingSummary">Choose a date, party size, and time</div>
           <button class="primary-action" id="submitBooking" type="submit" disabled>Make Booking</button>
         </form>
 
-
         <section class="booking-receipt" id="bookingReceipt" aria-labelledby="receiptTitle" hidden>
           <div class="receipt-heading">
-            <span class="receipt-check" aria-hidden="true">✓</span>
+            <span class="receipt-check" aria-hidden="true">&#10003;</span>
             <div>
               <p class="eyebrow">CONFIRMED</p>
-              <h3 id="receiptTitle">预订成功</h3>
+              <h3 id="receiptTitle">Booking confirmed</h3>
             </div>
           </div>
-          <p class="receipt-reminder" id="receiptReminder">请立即复制并保存预订编号，取消预订时需要使用。</p>
+          <p class="receipt-reminder" id="receiptReminder">Copy and save your booking code now. You will need it if you want to cancel later.</p>
           <div class="receipt-code-row">
-            <span>预订编号</span>
+            <span>Booking code</span>
             <strong id="receiptCode"></strong>
-            <button class="copy-code-button" id="copyBookingCode" type="button">复制编号</button>
+            <button class="copy-code-button" id="copyBookingCode" type="button">Copy code</button>
           </div>
           <p class="receipt-details" id="receiptDetails"></p>
-          <p class="receipt-state" id="receiptState">已确认</p>
+          <p class="receipt-state" id="receiptState">Confirmed</p>
         </section>
 
         <section class="cancel-booking" aria-labelledby="cancelTitle">
           <div class="section-title">
-            <h3 id="cancelTitle">取消预订</h3>
+            <h3 id="cancelTitle">Cancel Booking</h3>
             <span>Booking code</span>
           </div>
           <form id="cancelForm" class="cancel-form">
             <div class="cancel-fields">
               <label class="field">
-                <span>预订编号</span>
-                <input id="cancelCode" type="text" maxlength="17" autocomplete="off" placeholder="请输入已保存的预订编号" required />
+                <span>Booking code</span>
+                <input id="cancelCode" type="text" maxlength="17" autocomplete="off" placeholder="Enter your saved booking code" required />
               </label>
             </div>
-            <button class="ghost-action" id="cancelBooking" type="submit" disabled>取消预订</button>
+            <button class="ghost-action" id="cancelBooking" type="submit" disabled>Cancel Booking</button>
             <p class="helper-text" id="cancelStatus"></p>
           </form>
         </section>
-        <p class="powered-by">Powered by <strong>TenSeat</strong> · A$10/month</p>
+        <p class="powered-by">Powered by <strong>TenSeat</strong> &middot; A$10/month</p>
       </section>
     </main>
 

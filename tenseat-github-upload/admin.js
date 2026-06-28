@@ -42,7 +42,9 @@ var el = {
   tableWrap: document.getElementById("tableWrap"),
   empty: document.getElementById("emptyState"),
   ownerBookingForm: document.getElementById("ownerBookingForm"),
-  ownerGuestName: document.getElementById("ownerGuestName"),
+  ownerLastName: document.getElementById("ownerLastName"),
+  ownerFirstName: document.getElementById("ownerFirstName"),
+  ownerPhone: document.getElementById("ownerPhone"),
   ownerBookingTime: document.getElementById("ownerBookingTime"),
   ownerPartySize: document.getElementById("ownerPartySize"),
   ownerBookingNotes: document.getElementById("ownerBookingNotes"),
@@ -153,7 +155,7 @@ function showDashboard() {
   applyRestaurant();
   if (restaurant.mustChangePassword) {
     showView("settings");
-    showToast("请先修改默认密码");
+    showToast("Please change the default password first.");
   } else {
     showView("bookings");
     loadBookings();
@@ -161,9 +163,9 @@ function showDashboard() {
 }
 
 function applyRestaurant() {
-  document.title = restaurant.name + " · TenSeat";
+  document.title = restaurant.name + " - TenSeat";
   el.topbarRestaurant.textContent = restaurant.name;
-  el.restaurantHeading.textContent = restaurant.name + " 预订";
+  el.restaurantHeading.textContent = restaurant.name + " Bookings";
   el.serviceTime.textContent = formatServicePeriods();
   el.settingsName.value = restaurant.name;
   el.settingsAddress.value = restaurant.address || "";
@@ -180,7 +182,7 @@ function applyRestaurant() {
   var link = localBookingOrigin() + "/r/" + restaurant.slug;
   el.bookingLink.value = link;
   el.openBookingLink.href = link;
-  el.planStatus.textContent = restaurant.subscriptionStatus === "active" ? "已订阅" : "试用中";
+  el.planStatus.textContent = restaurant.subscriptionStatus === "active" ? "Active" : "Trial";
   el.securityAlert.hidden = !restaurant.mustChangePassword;
 }
 
@@ -227,38 +229,52 @@ function renderBookings(result) {
   el.guestCount.textContent = result.summary.guestCount;
   el.cancelledCount.textContent = result.summary.cancelledCount;
   el.noShowCount.textContent = result.summary.noShowCount || 0;
-  el.listTitle.textContent = formatDate(result.date) + "预订";
-  el.lastUpdated.textContent = "更新于 " + formatTime(new Date());
+  el.listTitle.textContent = formatDate(result.date) + " bookings";
+  el.lastUpdated.textContent = "Updated at " + formatTime(new Date());
   el.rows.replaceChildren();
   el.tableWrap.hidden = !result.bookings.length;
   el.empty.hidden = Boolean(result.bookings.length);
 
   result.bookings.forEach(function (booking) {
     var row = document.createElement("tr");
-    row.appendChild(createCell(booking.name || "—", "guest-name"));
-    row.appendChild(createCell(booking.time, "time-value"));
+    row.appendChild(createCell(bookingLastName(booking), "guest-name", "Last name"));
+    row.appendChild(createCell(bookingFirstName(booking), "guest-name", "First name"));
+    row.appendChild(createCell(booking.phone || "-", "booking-phone", "Phone"));
+    row.appendChild(createCell(booking.time, "time-value", "Time"));
     var partyCell = document.createElement("td");
+    partyCell.dataset.label = "Party";
     var party = document.createElement("span");
     party.className = "party-value";
     var count = document.createElement("strong");
     count.textContent = booking.partySize;
-    party.append(count, document.createTextNode(" 人"));
+    party.append(count, document.createTextNode(Number(booking.partySize) === 1 ? " guest" : " guests"));
     partyCell.appendChild(party);
     row.appendChild(partyCell);
     var status = booking.status === "cancelled" ? "cancelled" : booking.status === "no_show" ? "no_show" : "confirmed";
     row.classList.toggle("cancelled-row", status === "cancelled");
     row.classList.toggle("no-show-row", status === "no_show");
-    row.appendChild(createCell(statusLabel(status), "booking-status " + status));
-    row.appendChild(createCell(booking.notes || "—", "booking-notes"));
-    row.appendChild(createCell(booking.code, "booking-code"));
-    row.appendChild(createCell(formatTime(new Date(booking.createdAt)), "received-time"));
-    row.appendChild(createActionsCell(booking));
+    row.appendChild(createCell(statusLabel(status), "booking-status " + status, "Status"));
+    row.appendChild(createCell(booking.notes || "-", "booking-notes", "Notes"));
+    row.appendChild(createCell(booking.code, "booking-code", "Booking code"));
+    row.appendChild(createCell(formatTime(new Date(booking.createdAt)), "received-time", "Received"));
+    var actionsCell = createActionsCell(booking);
+    actionsCell.dataset.label = "Actions";
+    row.appendChild(actionsCell);
     el.rows.appendChild(row);
   });
 }
 
-function createCell(value, className) {
+function bookingFirstName(booking) {
+  return booking.firstName || "-";
+}
+
+function bookingLastName(booking) {
+  return booking.lastName || booking.name || "-";
+}
+
+function createCell(value, className, label) {
   var cell = document.createElement("td");
+  if (label) cell.dataset.label = label;
   var content = document.createElement("span");
   content.className = className;
   content.textContent = value;
@@ -271,10 +287,10 @@ function createActionsCell(booking) {
   var actions = document.createElement("div");
   actions.className = "booking-actions";
   if (booking.status !== "confirmed") {
-    actions.appendChild(actionButton("恢复", "restore", function () { updateBookingStatus(booking.code, "confirmed"); }));
+    actions.appendChild(actionButton("Restore", "restore", function () { updateBookingStatus(booking.code, "confirmed"); }));
   }
   if (booking.status !== "cancelled") {
-    actions.appendChild(actionButton("取消", "danger", function () { updateBookingStatus(booking.code, "cancelled"); }));
+    actions.appendChild(actionButton("Cancel", "danger", function () { updateBookingStatus(booking.code, "cancelled"); }));
   }
   if (booking.status !== "no_show") {
     actions.appendChild(actionButton("No-show", "", function () { updateBookingStatus(booking.code, "no_show"); }));
@@ -293,9 +309,9 @@ function actionButton(label, tone, handler) {
 }
 
 function statusLabel(status) {
-  if (status === "cancelled") return "已取消";
+  if (status === "cancelled") return "Cancelled";
   if (status === "no_show") return "No-show";
-  return "已确认";
+  return "Confirmed";
 }
 
 async function createOwnerBooking(event) {
@@ -305,7 +321,9 @@ async function createOwnerBooking(event) {
       method: "POST",
       body: JSON.stringify({
         date: el.date.value,
-        name: el.ownerGuestName.value.trim(),
+        lastName: el.ownerLastName.value.trim(),
+        firstName: el.ownerFirstName.value.trim(),
+        phone: el.ownerPhone.value.trim(),
         time: el.ownerBookingTime.value,
         partySize: Number(el.ownerPartySize.value),
         notes: el.ownerBookingNotes.value.trim()
@@ -313,7 +331,7 @@ async function createOwnerBooking(event) {
     });
     el.ownerBookingForm.reset();
     el.ownerPartySize.value = Math.min(2, restaurant.maxPartySize || 2);
-    showToast("预订已新增");
+    showToast("Booking added.");
     loadBookings();
   } catch (error) {
     showToast(error.message);
@@ -326,7 +344,7 @@ async function updateBookingStatus(code, status) {
       method: "PATCH",
       body: JSON.stringify({ status: status })
     });
-    showToast("预订状态已更新");
+    showToast("Booking status updated.");
     loadBookings();
   } catch (error) {
     showToast(error.message);
@@ -351,7 +369,7 @@ async function saveSettings(event) {
     });
     restaurant = result.restaurant;
     applyRestaurant();
-    showToast("餐馆设置已保存");
+    showToast("Restaurant settings saved.");
   } catch (error) {
     showToast(error.message);
   }
@@ -379,7 +397,7 @@ function collectServicePeriods() {
 
 function formatServicePeriods() {
   return servicePeriods().map(function (period) {
-    return period.openingTime + "–" + period.closingTime;
+    return period.openingTime + "-" + period.closingTime;
   }).join(" / ");
 }
 
@@ -400,7 +418,7 @@ async function changePassword(event) {
       applyRestaurant();
     }
     el.passwordForm.reset();
-    showToast("密码已更新");
+    showToast("Password updated.");
   } catch (error) {
     showToast(error.message);
   }
@@ -409,10 +427,11 @@ async function changePassword(event) {
 async function copyBookingLink() {
   try {
     await navigator.clipboard.writeText(el.bookingLink.value);
-    el.copyLink.textContent = "已复制";
-    showToast("预约链接已复制");
+    el.copyLink.textContent = "Copied";
+    showToast("Booking link copied.");
+    window.setTimeout(function () { el.copyLink.textContent = "Copy link"; }, 1600);
   } catch {
-    showToast("无法复制，请手动选择链接");
+    showToast("Could not copy. Please select the link manually.");
   }
 }
 
@@ -424,7 +443,7 @@ async function jsonRequest(path, options, needsAuth) {
   var response = await fetch(API_BASE + path, requestOptions);
   var result = await response.json();
   if (!response.ok || !result.ok) {
-    var error = new Error(result.error || "请求失败");
+    var error = new Error(result.error || "Request failed.");
     error.status = response.status;
     throw error;
   }
@@ -434,16 +453,16 @@ async function jsonRequest(path, options, needsAuth) {
 function setLoading(isLoading) {
   el.refresh.disabled = isLoading;
   el.refresh.classList.toggle("loading", isLoading);
-  el.refresh.textContent = isLoading ? "…" : "↻";
+  el.refresh.textContent = isLoading ? "..." : "\u21bb";
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "short" })
-    .format(new Date(value + "T12:00:00")) + " ";
+  return new Intl.DateTimeFormat("en-AU", { month: "long", day: "numeric", weekday: "short" })
+    .format(new Date(value + "T12:00:00"));
 }
 
 function formatTime(date) {
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return new Intl.DateTimeFormat("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
 function toDateInput(date) {

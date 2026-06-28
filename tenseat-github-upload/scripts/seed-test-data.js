@@ -15,8 +15,8 @@ const fixtures = [
     timeSlotCapacity: 30,
     servicePeriods: [{ openingTime: "11:30", closingTime: "14:30" }],
     bookings: [
-      { name: "测试客人 A", time: "12:10", partySize: 2, notes: "靠窗" },
-      { name: "测试客人 B", time: "13:45", partySize: 4, notes: "生日" }
+      { firstName: "Ava", lastName: "Smith", phone: "0400 111 222", time: "12:10", partySize: 2, notes: "Window seat" },
+      { firstName: "Noah", lastName: "Lee", phone: "0400 333 444", time: "13:45", partySize: 4, notes: "Birthday" }
     ]
   },
   {
@@ -33,9 +33,9 @@ const fixtures = [
       { openingTime: "17:00", closingTime: "21:00" }
     ],
     bookings: [
-      { name: "午餐测试客人", time: "12:30", partySize: 3, notes: "需要儿童椅" },
-      { name: "晚餐测试客人", time: "18:45", partySize: 5, notes: "花生过敏" },
-      { name: "已取消测试客人", time: "20:00", partySize: 2, notes: "测试取消", cancel: true }
+      { firstName: "Mia", lastName: "Brown", phone: "0400 555 666", time: "12:30", partySize: 3, notes: "High chair" },
+      { firstName: "Jack", lastName: "Wilson", phone: "0400 777 888", time: "18:45", partySize: 5, notes: "Peanut allergy" },
+      { firstName: "Olivia", lastName: "Taylor", phone: "0400 999 000", time: "20:00", partySize: 2, notes: "Cancelled test", cancel: true }
     ]
   }
 ];
@@ -102,7 +102,9 @@ async function seedBookings(fixture, token) {
 
   for (const booking of fixture.bookings) {
     const existing = current.bookings.find(function (item) {
-      return item.name === booking.name && item.time === booking.time;
+      return item.lastName === booking.lastName &&
+        item.firstName === booking.firstName &&
+        item.time === booking.time;
     });
     if (existing) continue;
 
@@ -110,7 +112,9 @@ async function seedBookings(fixture, token) {
       method: "POST",
       body: JSON.stringify({
         date: BOOKING_DATE,
-        name: booking.name,
+        firstName: booking.firstName,
+        lastName: booking.lastName,
+        phone: booking.phone,
         partySize: booking.partySize,
         time: booking.time,
         notes: booking.notes || ""

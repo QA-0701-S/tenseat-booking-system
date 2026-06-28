@@ -100,7 +100,7 @@ function enforceRateLimit(request, response, bucket, rule) {
   if (result.ok) return false;
   sendJson(response, 429, {
     ok: false,
-    error: "请求太频繁，请稍后再试"
+    error: "Too many requests. Please try again later."
   }, { "Retry-After": String(result.retryAfter) });
   return true;
 }
@@ -165,18 +165,18 @@ function servicePeriodsFor(restaurant) {
 }
 
 function validateServicePeriods(periods) {
-  if (!periods.length) return "请至少填写一个营业时间段";
-  if (periods.length > 2) return "最多只能设置两个营业时间段";
+  if (!periods.length) return "Add at least one service period.";
+  if (periods.length > 2) return "Only two service periods are supported.";
   for (const period of periods) {
     if (!isValidTime(period.openingTime) || !isValidTime(period.closingTime)) {
-      return "请填写完整有效的营业时间";
+      return "Enter complete, valid service hours.";
     }
     if (timeToMinutes(period.openingTime) >= timeToMinutes(period.closingTime)) {
-      return "每个营业时间段的结束时间必须晚于开始时间";
+      return "Each service period must close after it opens.";
     }
   }
   if (periods.length === 2 && timeToMinutes(periods[0].closingTime) > timeToMinutes(periods[1].openingTime)) {
-    return "两个营业时间段不能重叠";
+    return "Service periods cannot overlap.";
   }
   return "";
 }
@@ -196,6 +196,33 @@ function isTimeInServicePeriods(time, periods) {
 
 function normalizeNotes(value) {
   return String(value || "").trim().slice(0, 300);
+}
+
+function normalizeGuestText(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizePhone(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function personFromInput(input) {
+  const firstName = normalizeGuestText(input.firstName);
+  const lastName = normalizeGuestText(input.lastName);
+  const legacyName = normalizeGuestText(input.name);
+  return {
+    firstName: firstName,
+    lastName: lastName,
+    legacyName: legacyName,
+    displayName: firstName && lastName ? firstName + " " + lastName : legacyName
+  };
+}
+
+function bookingDisplayName(booking) {
+  const firstName = normalizeGuestText(booking.firstName);
+  const lastName = normalizeGuestText(booking.lastName);
+  if (firstName || lastName) return [firstName, lastName].filter(Boolean).join(" ");
+  return normalizeGuestText(booking.name);
 }
 
 function activeBooking(booking) {
@@ -330,9 +357,9 @@ function validatePassword(password) {
   const value = String(password || "");
   const lower = value.toLowerCase();
   const weakPasswords = new Set(["1919", "password", "password1", "12345678", "123456789", "qwerty123"]);
-  if (value.length < 8) return "密码至少需要 8 个字符";
-  if (weakPasswords.has(lower)) return "这个密码太容易被猜到，请换一个更安全的密码";
-  if (!/[a-z]/i.test(value) || !/\d/.test(value)) return "密码需要同时包含字母和数字";
+  if (value.length < 8) return "Password must be at least 8 characters.";
+  if (weakPasswords.has(lower)) return "This password is too easy to guess. Choose a stronger password.";
+  if (!/[a-z]/i.test(value) || !/\d/.test(value)) return "Password must include both letters and numbers.";
   return "";
 }
 
@@ -381,14 +408,14 @@ async function readJsonBody(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new Error("请求内容过大");
+    if (size > MAX_BODY_BYTES) throw new Error("Request body is too large.");
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new Error("请求内容不是有效的 JSON");
+    throw new Error("Request body must be valid JSON.");
   }
 }
 
@@ -406,38 +433,41 @@ function validateRestaurantSettings(input) {
   const servicePeriods = servicePeriodsFromInput(input, false);
   const maxPartySize = Number(input.maxPartySize);
   const timeSlotCapacity = Number(input.timeSlotCapacity || input.maxGuestsPerTime || maxPartySize);
-  if (!name || name.length > 80) return "请填写有效的餐馆名称";
+  if (!name || name.length > 80) return "Enter a valid restaurant name.";
   const servicePeriodsError = validateServicePeriods(servicePeriods);
   if (servicePeriodsError) return servicePeriodsError;
   if (!Number.isInteger(maxPartySize) || maxPartySize < 1 || maxPartySize > 100) {
-    return "单次预约人数必须在 1 到 100 之间";
+    return "Maximum party size must be between 1 and 100.";
   }
   if (!Number.isInteger(timeSlotCapacity) || timeSlotCapacity < maxPartySize || timeSlotCapacity > 500) {
-    return "同一时间最多接待人数必须大于等于单次预约人数上限，且不超过 500";
+    return "Capacity at the same time must be at least the maximum party size and no more than 500.";
   }
   return "";
 }
 
 function validateBooking(input, restaurant) {
   const date = String(input.date || "");
-  const name = String(input.name || "").trim();
+  const person = personFromInput(input);
+  const phone = normalizePhone(input.phone);
   const partySize = Number(input.partySize);
   const time = String(input.time || "");
   const today = localDateString(new Date());
-  if (!isValidBookingDate(date)) return "请选择有效的预约日期";
-  if (date < today) return "不能预约过去的日期";
-  if (!name || name.length > 80) return "请填写有效的客人姓名";
+  if (!isValidBookingDate(date)) return "Choose a valid booking date.";
+  if (date < today) return "Bookings cannot be made for past dates.";
+  if (!person.lastName || person.lastName.length > 80) return "Enter a valid guest last name.";
+  if (!person.firstName || person.firstName.length > 80) return "Enter a valid guest first name.";
+  if (!phone || !/^[0-9+\-()\s]{6,24}$/.test(phone)) return "Enter a valid phone number.";
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > restaurant.maxPartySize) {
-    return "人数必须在 1 到 " + restaurant.maxPartySize + " 人之间";
+    return "Party size must be between 1 and " + restaurant.maxPartySize + ".";
   }
-  if (String(input.notes || "").trim().length > 300) return "备注不能超过 300 个字符";
-  if (!isValidTime(time)) return "请选择有效的时间";
+  if (String(input.notes || "").trim().length > 300) return "Notes must be 300 characters or fewer.";
+  if (!isValidTime(time)) return "Choose a valid time.";
   const servicePeriods = servicePeriodsFor(restaurant);
   if (!isTimeInServicePeriods(time, servicePeriods)) {
-    return "时间必须在 " + formatServicePeriods(servicePeriods) + " 之间";
+    return "Time must be within " + formatServicePeriods(servicePeriods) + ".";
   }
   if (date === today && new Date(date + "T" + time + ":00") < new Date()) {
-    return "这个时间今天已经过去，请换一个时间或日期";
+    return "That time has already passed today. Choose another time or date.";
   }
   return "";
 }
@@ -457,19 +487,23 @@ function capacityError(input, restaurant, bookings, excludeCode) {
     .reduce(function (total, booking) { return total + Number(booking.partySize || 0); }, 0);
   const capacity = Number(restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20));
   if (currentGuests + partySize > capacity) {
-    return "这个时间人数已满，还剩 " + Math.max(0, capacity - currentGuests) + " 个位置";
+    return "That time is full. " + Math.max(0, capacity - currentGuests) + " seats are still available.";
   }
   return "";
 }
 
-function bookingResponse(booking) {
+function bookingResponse(booking, options) {
+  const includePrivate = Boolean(options && options.includePrivate);
   return {
     id: booking.id,
     code: booking.code,
     restaurantId: booking.restaurantId,
     restaurant: booking.restaurant,
     date: booking.date,
-    name: booking.name,
+    firstName: booking.firstName || "",
+    lastName: booking.lastName || "",
+    name: bookingDisplayName(booking),
+    phone: includePrivate ? (booking.phone || "") : undefined,
     time: booking.time,
     partySize: booking.partySize,
     notes: booking.notes || "",
@@ -477,6 +511,20 @@ function bookingResponse(booking) {
     createdAt: booking.createdAt,
     cancelledAt: booking.cancelledAt,
     noShowAt: booking.noShowAt
+  };
+}
+
+function publicBookingResponse(booking) {
+  return {
+    code: booking.code,
+    date: booking.date,
+    firstName: booking.firstName || "",
+    lastName: booking.lastName || "",
+    name: bookingDisplayName(booking),
+    time: booking.time,
+    partySize: booking.partySize,
+    notes: booking.notes || "",
+    status: booking.status
   };
 }
 
@@ -499,7 +547,7 @@ async function handleRegister(request, response) {
   const settingsError = validateRestaurantSettings(settings);
   const passwordError = validatePassword(password);
   if (settingsError) return sendJson(response, 400, { ok: false, error: settingsError });
-  if (!isValidEmail(email)) return sendJson(response, 400, { ok: false, error: "请填写有效的登录邮箱" });
+  if (!isValidEmail(email)) return sendJson(response, 400, { ok: false, error: "Enter a valid login email." });
   if (passwordError) return sendJson(response, 400, { ok: false, error: passwordError });
 
   const passwordFields = await passwordRecord(password);
@@ -508,7 +556,7 @@ async function handleRegister(request, response) {
   dataWriteQueue = dataWriteQueue.then(async function () {
     const restaurants = await readArray(RESTAURANTS_FILE);
     if (restaurants.some(function (restaurant) { return restaurant.ownerEmail === email; })) {
-      conflict = "这个邮箱已经注册";
+      conflict = "This email is already registered.";
       return;
     }
     const baseSlug = makeSlug(settings.name);
@@ -556,20 +604,20 @@ async function handleLogin(request, response) {
   const restaurants = await readArray(RESTAURANTS_FILE);
   const restaurant = restaurants.find(function (candidate) { return candidate.ownerEmail === email; });
   if (!restaurant || !(await passwordMatches(password, restaurant))) {
-    return sendJson(response, 401, { ok: false, error: "邮箱或密码不正确" });
+    return sendJson(response, 401, { ok: false, error: "Email or password is incorrect." });
   }
   sendJson(response, 200, { ok: true, token: issueToken(restaurant.id), restaurant: ownerRestaurant(restaurant) });
 }
 
 async function handleOwnerMe(request, response) {
   const restaurant = await authenticatedRestaurant(request);
-  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   sendJson(response, 200, { ok: true, restaurant: ownerRestaurant(restaurant) });
 }
 
 async function handleUpdateRestaurant(request, response) {
   const authenticated = await authenticatedRestaurant(request);
-  if (!authenticated) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!authenticated) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
   const settings = {
@@ -604,15 +652,15 @@ async function handleUpdateRestaurant(request, response) {
 
 async function handleChangePassword(request, response) {
   const authenticated = await authenticatedRestaurant(request);
-  if (!authenticated) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!authenticated) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
   const currentPassword = String(input.currentPassword || "");
   const newPassword = String(input.newPassword || "");
   if (!(await passwordMatches(currentPassword, authenticated))) {
-    return sendJson(response, 400, { ok: false, error: "当前密码不正确" });
+    return sendJson(response, 400, { ok: false, error: "Current password is incorrect." });
   }
-  if (newPassword === currentPassword) return sendJson(response, 400, { ok: false, error: "新密码不能和当前密码一样" });
+  if (newPassword === currentPassword) return sendJson(response, 400, { ok: false, error: "New password must be different from the current password." });
   const passwordError = validatePassword(newPassword);
   if (passwordError) return sendJson(response, 400, { ok: false, error: passwordError });
   const passwordFields = await passwordRecord(newPassword);
@@ -636,6 +684,8 @@ async function handleCreateBooking(request, response, restaurant) {
   if (!input) return;
   const validationError = validateBooking(input, restaurant);
   if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
+  const person = personFromInput(input);
+  const phone = normalizePhone(input.phone);
   let booking;
   let fullError = "";
   dataWriteQueue = dataWriteQueue.then(async function () {
@@ -648,7 +698,10 @@ async function handleCreateBooking(request, response, restaurant) {
       restaurantId: restaurant.id,
       restaurant: restaurant.name,
       date: String(input.date),
-      name: String(input.name).trim(),
+      firstName: person.firstName,
+      lastName: person.lastName,
+      name: person.displayName,
+      phone: phone,
       time: String(input.time),
       partySize: Number(input.partySize),
       notes: normalizeNotes(input.notes),
@@ -661,7 +714,7 @@ async function handleCreateBooking(request, response, restaurant) {
   });
   await dataWriteQueue;
   if (fullError) return sendJson(response, 409, { ok: false, error: fullError });
-  sendJson(response, 201, { ok: true, booking: bookingResponse(booking) });
+  sendJson(response, 201, { ok: true, booking: publicBookingResponse(booking) });
 }
 
 async function handleCancelBooking(request, response, restaurant) {
@@ -669,7 +722,7 @@ async function handleCancelBooking(request, response, restaurant) {
   if (!input) return;
   const code = String(input.code || "").trim().toUpperCase();
   if (!/^(C[A-F0-9]{6,16}|TS-[A-Z0-9]{6})$/.test(code)) {
-    return sendJson(response, 400, { ok: false, error: "请填写有效的预订编号" });
+    return sendJson(response, 400, { ok: false, error: "Enter a valid booking code." });
   }
   let outcome = "not_found";
   let cancelledBooking;
@@ -690,18 +743,20 @@ async function handleCancelBooking(request, response, restaurant) {
     await writeArray(BOOKINGS_FILE, bookings);
   });
   await dataWriteQueue;
-  if (outcome === "not_found") return sendJson(response, 404, { ok: false, error: "找不到这个预订编号" });
-  if (outcome === "already_cancelled") return sendJson(response, 409, { ok: false, error: "这笔预订已经取消" });
-  sendJson(response, 200, { ok: true, booking: bookingResponse(cancelledBooking) });
+  if (outcome === "not_found") return sendJson(response, 404, { ok: false, error: "Booking code not found." });
+  if (outcome === "already_cancelled") return sendJson(response, 409, { ok: false, error: "This booking has already been cancelled." });
+  sendJson(response, 200, { ok: true, booking: publicBookingResponse(cancelledBooking) });
 }
 
 async function handleOwnerCreateBooking(request, response) {
   const restaurant = await authenticatedRestaurant(request);
-  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
   const validationError = validateBooking(input, restaurant);
   if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
+  const person = personFromInput(input);
+  const phone = normalizePhone(input.phone);
 
   let booking;
   let fullError = "";
@@ -715,7 +770,10 @@ async function handleOwnerCreateBooking(request, response) {
       restaurantId: restaurant.id,
       restaurant: restaurant.name,
       date: String(input.date),
-      name: String(input.name).trim(),
+      firstName: person.firstName,
+      lastName: person.lastName,
+      name: person.displayName,
+      phone: phone,
       time: String(input.time),
       partySize: Number(input.partySize),
       notes: normalizeNotes(input.notes),
@@ -728,17 +786,17 @@ async function handleOwnerCreateBooking(request, response) {
   });
   await dataWriteQueue;
   if (fullError) return sendJson(response, 409, { ok: false, error: fullError });
-  sendJson(response, 201, { ok: true, booking: bookingResponse(booking) });
+  sendJson(response, 201, { ok: true, booking: bookingResponse(booking, { includePrivate: true }) });
 }
 
 async function handleOwnerUpdateBooking(request, response, code) {
   const restaurant = await authenticatedRestaurant(request);
-  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
   const nextStatus = String(input.status || "").trim();
   if (!["confirmed", "cancelled", "no_show"].includes(nextStatus)) {
-    return sendJson(response, 400, { ok: false, error: "请选择有效的预订状态" });
+    return sendJson(response, 400, { ok: false, error: "Choose a valid booking status." });
   }
 
   let updated;
@@ -761,16 +819,16 @@ async function handleOwnerUpdateBooking(request, response, code) {
     await writeArray(BOOKINGS_FILE, bookings);
   });
   await dataWriteQueue;
-  if (!updated) return sendJson(response, 404, { ok: false, error: "找不到这笔预订" });
-  sendJson(response, 200, { ok: true, booking: bookingResponse(updated) });
+  if (!updated) return sendJson(response, 404, { ok: false, error: "Booking not found." });
+  sendJson(response, 200, { ok: true, booking: bookingResponse(updated, { includePrivate: true }) });
 }
 
 async function handleOwnerBookings(request, response, requestUrl) {
   const restaurant = await authenticatedRestaurant(request);
-  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const requestedDate = String(requestUrl.searchParams.get("date") || localDateString(new Date()));
   if (!isValidBookingDate(requestedDate)) {
-    return sendJson(response, 400, { ok: false, error: "日期格式不正确" });
+    return sendJson(response, 400, { ok: false, error: "Date format is invalid." });
   }
   const allBookings = await readArray(BOOKINGS_FILE);
   const bookings = allBookings
@@ -784,7 +842,7 @@ async function handleOwnerBookings(request, response, requestUrl) {
   sendJson(response, 200, {
     ok: true,
     date: requestedDate,
-    bookings: bookings.map(bookingResponse),
+    bookings: bookings.map(function (booking) { return bookingResponse(booking, { includePrivate: true }); }),
     summary: {
       bookingCount: active.length,
       guestCount: active.reduce(function (total, booking) { return total + booking.partySize; }, 0),
@@ -867,7 +925,7 @@ async function route(request, response) {
 
   if (restaurantMatch) {
     const restaurant = await findRestaurantBySlug(restaurantMatch[1]);
-    if (!restaurant) return sendJson(response, 404, { ok: false, error: "找不到这家餐馆" });
+    if (!restaurant) return sendJson(response, 404, { ok: false, error: "Restaurant not found." });
     if (request.method === "GET" && !restaurantMatch[2]) {
       return sendJson(response, 200, { ok: true, restaurant: publicRestaurant(restaurant) });
     }
@@ -881,7 +939,7 @@ async function route(request, response) {
     }
   }
 
-  if (pathname.startsWith("/api/")) return sendJson(response, 404, { ok: false, error: "接口不存在" });
+  if (pathname.startsWith("/api/")) return sendJson(response, 404, { ok: false, error: "API endpoint not found." });
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.writeHead(405, { Allow: "GET, HEAD, POST, PATCH, OPTIONS" });
     response.end("Method not allowed");
@@ -996,7 +1054,7 @@ async function fileExists(file) {
 const server = http.createServer(function (request, response) {
   route(request, response).catch(function (error) {
     console.error(error);
-    if (!response.headersSent) sendJson(response, 500, { ok: false, error: "服务器暂时无法处理请求" });
+    if (!response.headersSent) sendJson(response, 500, { ok: false, error: "The server could not process the request right now." });
     else response.end();
   });
 });

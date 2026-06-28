@@ -16,7 +16,9 @@ var el = {
   openStatus: document.getElementById("openStatus"),
   form: document.getElementById("bookingForm"),
   date: document.getElementById("bookingDate"),
-  name: document.getElementById("bookingName"),
+  firstName: document.getElementById("bookingFirstName"),
+  lastName: document.getElementById("bookingLastName"),
+  phone: document.getElementById("bookingPhone"),
   notes: document.getElementById("bookingNotes"),
   hour: document.getElementById("bookingHour"),
   minute: document.getElementById("bookingMinute"),
@@ -47,7 +49,7 @@ async function init() {
   try {
     var response = await fetch(API_BASE + "/api/restaurants/" + encodeURIComponent(restaurantSlug));
     var result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || "无法读取餐馆信息");
+    if (!response.ok || !result.ok) throw new Error(result.error || "Could not load restaurant details.");
     restaurant = result.restaurant;
     applyRestaurant();
 
@@ -63,7 +65,7 @@ async function init() {
     updateCancelState();
   } catch (error) {
     el.summary.textContent = error.message;
-    el.timeStatus.textContent = "暂时无法预约";
+    el.timeStatus.textContent = "Bookings are unavailable right now.";
     el.submit.disabled = true;
     showToast(error.message);
   }
@@ -77,7 +79,7 @@ function getRestaurantSlug() {
 }
 
 function applyRestaurant() {
-  document.title = restaurant.name + " Booking · TenSeat";
+  document.title = restaurant.name + " Booking - TenSeat";
   el.restaurantName.textContent = restaurant.name;
   el.restaurantAddress.textContent = restaurant.address || restaurant.name;
   el.timeRange.textContent = formatServicePeriods();
@@ -88,7 +90,9 @@ function applyRestaurant() {
 
 function wireEvents() {
   el.date.addEventListener("change", handleDateChange);
-  el.name.addEventListener("input", updateSummary);
+  el.firstName.addEventListener("input", updateSummary);
+  el.lastName.addEventListener("input", updateSummary);
+  el.phone.addEventListener("input", updateSummary);
   el.notes.addEventListener("input", updateSummary);
   el.hour.addEventListener("change", handleHourChange);
   el.minute.addEventListener("change", syncTimeFromPicker);
@@ -104,7 +108,7 @@ function populatePartySizes() {
   for (var size = 1; size <= restaurant.maxPartySize; size += 1) {
     var option = document.createElement("option");
     option.value = String(size);
-    option.textContent = size + " 人";
+    option.textContent = size + (size === 1 ? " guest" : " guests");
     if (size === Math.min(2, restaurant.maxPartySize)) option.selected = true;
     el.partySize.appendChild(option);
   }
@@ -176,37 +180,42 @@ function syncTimeFromPicker() {
 function updateAvailability() {
   if (!restaurant) return;
   var message = getDateValidationMessage() || getTimeValidationMessage();
-  el.timeStatus.textContent = message || "可预订 · 24小时制";
+  el.timeStatus.textContent = message || "Available - 24-hour time";
   el.timeStatus.classList.toggle("available", !message);
   updateSummary();
 }
 
 function getDateValidationMessage() {
-  if (!el.date.value) return "请选择预约日期";
-  if (el.date.value < toDateInput(new Date())) return "不能预约过去的日期";
+  if (!el.date.value) return "Choose a booking date.";
+  if (el.date.value < toDateInput(new Date())) return "Bookings cannot be made for past dates.";
   return "";
 }
 
-function getNameValidationMessage() {
-  var name = el.name.value.trim();
-  if (!name) return "请填写客人姓名";
-  if (name.length > 80) return "姓名不能超过 80 个字符";
+function getGuestValidationMessage() {
+  var firstName = el.firstName.value.trim();
+  var lastName = el.lastName.value.trim();
+  var phone = el.phone.value.trim();
+  if (!lastName) return "Enter the guest last name.";
+  if (!firstName) return "Enter the guest first name.";
+  if (lastName.length > 80 || firstName.length > 80) return "Names must be 80 characters or fewer.";
+  if (!phone) return "Enter a phone number.";
+  if (!/^[0-9+\-()\s]{6,24}$/.test(phone)) return "Enter a valid phone number.";
   return "";
 }
 
 function getTimeValidationMessage() {
-  if (!restaurant) return "餐馆信息正在加载";
-  if (!el.time.value) return "请选择预约时间";
+  if (!restaurant) return "Restaurant details are still loading.";
+  if (!el.time.value) return "Choose a booking time.";
   if (!isTimeWithinRange(el.time.value)) {
-    return "时间必须在 " + formatServicePeriods() + " 之间";
+    return "Time must be within " + formatServicePeriods() + ".";
   }
-  if (isSelectedTimeInPast()) return "这个时间已经过去，请换一个时间或日期";
+  if (isSelectedTimeInPast()) return "That time has already passed. Choose another time or date.";
   return "";
 }
 
 async function handleBookingSubmit(event) {
   event.preventDefault();
-  var validationMessage = getDateValidationMessage() || getNameValidationMessage() || getTimeValidationMessage();
+  var validationMessage = getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
   if (validationMessage) return showToast(validationMessage);
 
   var confirmedCode = "";
@@ -219,25 +228,27 @@ async function handleBookingSubmit(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         date: el.date.value,
-        name: el.name.value.trim(),
+        firstName: el.firstName.value.trim(),
+        lastName: el.lastName.value.trim(),
+        phone: el.phone.value.trim(),
         notes: el.notes.value.trim(),
         partySize: Number(el.partySize.value),
         time: el.time.value
       })
     });
     var result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || "预订失败，请稍后再试");
+    if (!response.ok || !result.ok) throw new Error(result.error || "Booking failed. Please try again.");
     confirmedCode = result.booking.code;
     saveBookingReceipt(result.booking, "confirmed");
     showBookingReceipt(result.booking, "confirmed");
-    showToast("预订成功，请复制并保存预订编号");
+    showToast("Booking confirmed. Copy and save your booking code.");
   } catch (error) {
-    showToast(error instanceof TypeError ? "无法连接预订服务" : error.message);
+    showToast(error instanceof TypeError ? "Could not connect to the booking service." : error.message);
   } finally {
     submitting = false;
     el.submit.textContent = "Make Booking";
     updateSummary();
-    if (confirmedCode) el.summary.textContent = "预订成功，请复制并保存下方的预订编号";
+    if (confirmedCode) el.summary.textContent = "Booking confirmed. Copy and save the booking code below.";
   }
 }
 
@@ -249,7 +260,9 @@ function saveBookingReceipt(booking, status) {
   sessionStorage.setItem(receiptStorageKey(), JSON.stringify({
     code: booking.code,
     date: booking.date,
-    name: booking.name,
+    firstName: booking.firstName || el.firstName.value.trim(),
+    lastName: booking.lastName || el.lastName.value.trim(),
+    name: booking.name || displayName({ firstName: el.firstName.value.trim(), lastName: el.lastName.value.trim() }),
     notes: booking.notes || "",
     time: booking.time,
     partySize: booking.partySize,
@@ -273,18 +286,23 @@ function loadSavedBooking() {
 function showBookingReceipt(booking, status) {
   el.receipt.hidden = false;
   el.receipt.classList.toggle("cancelled", status === "cancelled");
-  el.receiptTitle.textContent = status === "cancelled" ? "预订已取消" : "预订成功";
+  el.receiptTitle.textContent = status === "cancelled" ? "Booking cancelled" : "Booking confirmed";
   el.receiptCode.textContent = booking.code;
   el.receiptReminder.hidden = status === "cancelled";
-  el.copyCode.textContent = "复制编号";
+  el.copyCode.textContent = "Copy code";
   el.receiptDetails.textContent = [
-    booking.name,
+    displayName(booking),
     booking.date,
     booking.time,
-    booking.partySize + " 人",
-    booking.notes ? "备注：" + booking.notes : ""
-  ].filter(Boolean).join(" · ");
-  el.receiptState.textContent = status === "cancelled" ? "已取消" : "已确认";
+    booking.partySize + (Number(booking.partySize) === 1 ? " guest" : " guests"),
+    booking.notes ? "Notes: " + booking.notes : ""
+  ].filter(Boolean).join(" - ");
+  el.receiptState.textContent = status === "cancelled" ? "Cancelled" : "Confirmed";
+}
+
+function displayName(booking) {
+  var parts = [booking.firstName, booking.lastName].filter(Boolean);
+  return parts.length ? parts.join(" ") : (booking.name || "");
 }
 
 function markSavedBookingCancelled(code) {
@@ -301,10 +319,10 @@ async function copyBookingCode() {
   if (!code) return;
   try {
     await navigator.clipboard.writeText(code);
-    el.copyCode.textContent = "已复制";
-    showToast("预订编号已复制");
+    el.copyCode.textContent = "Copied";
+    showToast("Booking code copied.");
   } catch {
-    showToast("无法复制，请手动记录编号");
+    showToast("Could not copy. Please write down the code.");
   }
 }
 
@@ -323,18 +341,18 @@ async function handleCancelSubmit(event) {
       body: JSON.stringify({ code: el.cancelCode.value.trim().toUpperCase() })
     });
     var result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || "无法取消预订");
-    el.cancelStatus.textContent = "取消成功 · " + result.booking.code;
+    if (!response.ok || !result.ok) throw new Error(result.error || "Could not cancel the booking.");
+    el.cancelStatus.textContent = "Cancelled - " + result.booking.code;
     el.cancelStatus.classList.add("cancel-status-success");
     markSavedBookingCancelled(result.booking.code);
-    showToast("取消成功 · " + result.booking.code);
+    showToast("Cancelled - " + result.booking.code);
   } catch (error) {
-    var message = error instanceof TypeError ? "无法连接预订服务" : error.message;
+    var message = error instanceof TypeError ? "Could not connect to the booking service." : error.message;
     el.cancelStatus.textContent = message;
     showToast(message);
   } finally {
     cancelling = false;
-    el.cancelSubmit.textContent = "取消预订";
+    el.cancelSubmit.textContent = "Cancel Booking";
     updateCancelState();
   }
 }
@@ -345,14 +363,14 @@ function updateCancelState() {
 
 function updateSummary() {
   if (!restaurant) return;
-  var validationMessage = getDateValidationMessage() || getNameValidationMessage() || getTimeValidationMessage();
+  var validationMessage = getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
   if (!el.date.value || !el.time.value) {
-    el.summary.textContent = "请选择日期、姓名、人数和时间";
+    el.summary.textContent = "Choose a date, guest details, party size, and time.";
     el.submit.disabled = true;
     return;
   }
   el.summary.textContent = formatBookingDate(el.date.value) + " " + el.time.value +
-    " · " + el.partySize.value + " 人";
+    " - " + el.partySize.value + (Number(el.partySize.value) === 1 ? " guest" : " guests");
   el.submit.disabled = submitting || Boolean(validationMessage) || !el.form.checkValidity();
 }
 
@@ -434,7 +452,7 @@ function getBookableMinutesForHour(hour) {
 }
 
 function formatBookingDate(value) {
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat("en-AU", {
     month: "long",
     day: "numeric",
     weekday: "short"
