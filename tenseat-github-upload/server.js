@@ -134,6 +134,85 @@ function timeToMinutes(time) {
   return parts[0] * 60 + parts[1];
 }
 
+function cleanServicePeriod(input) {
+  return {
+    openingTime: String((input && (input.openingTime || input.start)) || "").trim(),
+    closingTime: String((input && (input.closingTime || input.end)) || "").trim()
+  };
+}
+
+function servicePeriodsFromInput(input, useDefaults) {
+  let rawPeriods = Array.isArray(input.servicePeriods) ? input.servicePeriods.slice(0, 2) : null;
+  if (!rawPeriods) {
+    rawPeriods = [{
+      openingTime: input.openingTime || (useDefaults ? "11:30" : ""),
+      closingTime: input.closingTime || (useDefaults ? "14:30" : "")
+    }];
+  }
+  return rawPeriods
+    .map(cleanServicePeriod)
+    .filter(function (period) { return period.openingTime || period.closingTime; })
+    .sort(function (left, right) { return timeToMinutes(left.openingTime || "00:00") - timeToMinutes(right.openingTime || "00:00"); });
+}
+
+function servicePeriodsFor(restaurant) {
+  const periods = servicePeriodsFromInput({
+    servicePeriods: restaurant.servicePeriods,
+    openingTime: restaurant.openingTime,
+    closingTime: restaurant.closingTime
+  }, true);
+  return periods.length ? periods : [{ openingTime: "11:30", closingTime: "14:30" }];
+}
+
+function validateServicePeriods(periods) {
+  if (!periods.length) return "请至少填写一个营业时间段";
+  if (periods.length > 2) return "最多只能设置两个营业时间段";
+  for (const period of periods) {
+    if (!isValidTime(period.openingTime) || !isValidTime(period.closingTime)) {
+      return "请填写完整有效的营业时间";
+    }
+    if (timeToMinutes(period.openingTime) >= timeToMinutes(period.closingTime)) {
+      return "每个营业时间段的结束时间必须晚于开始时间";
+    }
+  }
+  if (periods.length === 2 && timeToMinutes(periods[0].closingTime) > timeToMinutes(periods[1].openingTime)) {
+    return "两个营业时间段不能重叠";
+  }
+  return "";
+}
+
+function formatServicePeriods(periods) {
+  return periods.map(function (period) {
+    return period.openingTime + "-" + period.closingTime;
+  }).join(" / ");
+}
+
+function isTimeInServicePeriods(time, periods) {
+  const value = timeToMinutes(time);
+  return periods.some(function (period) {
+    return value >= timeToMinutes(period.openingTime) && value <= timeToMinutes(period.closingTime);
+  });
+}
+
+function normalizeNotes(value) {
+  return String(value || "").trim().slice(0, 300);
+}
+
+function activeBooking(booking) {
+  return booking.status !== "cancelled" && booking.status !== "no_show";
+}
+
+function makeBookingCode(bookings) {
+  const existing = new Set(bookings.map(function (booking) {
+    return String(booking.code || "").toUpperCase();
+  }));
+  let code = "";
+  do {
+    code = "TS-" + crypto.randomBytes(4).toString("base64url").replace(/[_-]/g, "").slice(0, 6).toUpperCase();
+  } while (existing.has(code) || !/^TS-[A-Z0-9]{6}$/.test(code));
+  return code;
+}
+
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -154,13 +233,15 @@ function makeSlug(value) {
 }
 
 function publicRestaurant(restaurant) {
+  const servicePeriods = servicePeriodsFor(restaurant);
   return {
     slug: restaurant.slug,
     name: restaurant.name,
     address: restaurant.address,
     googleMapsQuery: restaurant.googleMapsQuery,
-    openingTime: restaurant.openingTime,
-    closingTime: restaurant.closingTime,
+    openingTime: servicePeriods[0].openingTime,
+    closingTime: servicePeriods[servicePeriods.length - 1].closingTime,
+    servicePeriods: servicePeriods,
     maxPartySize: restaurant.maxPartySize
   };
 }
@@ -173,6 +254,7 @@ function ownerRestaurant(restaurant) {
     priceMonthly: restaurant.priceMonthly,
     currency: restaurant.currency,
     subscriptionStatus: restaurant.subscriptionStatus,
+    timeSlotCapacity: restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20),
     trialEndsAt: restaurant.trialEndsAt,
     mustChangePassword: Boolean(restaurant.mustChangePassword)
   };
@@ -321,16 +403,17 @@ async function parseBody(request, response) {
 
 function validateRestaurantSettings(input) {
   const name = String(input.name || "").trim();
-  const openingTime = String(input.openingTime || "");
-  const closingTime = String(input.closingTime || "");
+  const servicePeriods = servicePeriodsFromInput(input, false);
   const maxPartySize = Number(input.maxPartySize);
+  const timeSlotCapacity = Number(input.timeSlotCapacity || input.maxGuestsPerTime || maxPartySize);
   if (!name || name.length > 80) return "请填写有效的餐馆名称";
-  if (!isValidTime(openingTime) || !isValidTime(closingTime) ||
-      timeToMinutes(openingTime) >= timeToMinutes(closingTime)) {
-    return "请选择有效的营业时间";
-  }
+  const servicePeriodsError = validateServicePeriods(servicePeriods);
+  if (servicePeriodsError) return servicePeriodsError;
   if (!Number.isInteger(maxPartySize) || maxPartySize < 1 || maxPartySize > 100) {
     return "单次预约人数必须在 1 到 100 之间";
+  }
+  if (!Number.isInteger(timeSlotCapacity) || timeSlotCapacity < maxPartySize || timeSlotCapacity > 500) {
+    return "同一时间最多接待人数必须大于等于单次预约人数上限，且不超过 500";
   }
   return "";
 }
@@ -347,15 +430,54 @@ function validateBooking(input, restaurant) {
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > restaurant.maxPartySize) {
     return "人数必须在 1 到 " + restaurant.maxPartySize + " 人之间";
   }
+  if (String(input.notes || "").trim().length > 300) return "备注不能超过 300 个字符";
   if (!isValidTime(time)) return "请选择有效的时间";
-  if (timeToMinutes(time) < timeToMinutes(restaurant.openingTime) ||
-      timeToMinutes(time) > timeToMinutes(restaurant.closingTime)) {
-    return "时间必须在 " + restaurant.openingTime + " 到 " + restaurant.closingTime + " 之间";
+  const servicePeriods = servicePeriodsFor(restaurant);
+  if (!isTimeInServicePeriods(time, servicePeriods)) {
+    return "时间必须在 " + formatServicePeriods(servicePeriods) + " 之间";
   }
   if (date === today && new Date(date + "T" + time + ":00") < new Date()) {
     return "这个时间今天已经过去，请换一个时间或日期";
   }
   return "";
+}
+
+function capacityError(input, restaurant, bookings, excludeCode) {
+  const date = String(input.date || "");
+  const time = String(input.time || "");
+  const partySize = Number(input.partySize);
+  const currentGuests = bookings
+    .filter(function (booking) {
+      return booking.restaurantId === restaurant.id &&
+        booking.date === date &&
+        booking.time === time &&
+        String(booking.code || "").toUpperCase() !== String(excludeCode || "").toUpperCase() &&
+        activeBooking(booking);
+    })
+    .reduce(function (total, booking) { return total + Number(booking.partySize || 0); }, 0);
+  const capacity = Number(restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20));
+  if (currentGuests + partySize > capacity) {
+    return "这个时间人数已满，还剩 " + Math.max(0, capacity - currentGuests) + " 个位置";
+  }
+  return "";
+}
+
+function bookingResponse(booking) {
+  return {
+    id: booking.id,
+    code: booking.code,
+    restaurantId: booking.restaurantId,
+    restaurant: booking.restaurant,
+    date: booking.date,
+    name: booking.name,
+    time: booking.time,
+    partySize: booking.partySize,
+    notes: booking.notes || "",
+    status: booking.status,
+    createdAt: booking.createdAt,
+    cancelledAt: booking.cancelledAt,
+    noShowAt: booking.noShowAt
+  };
 }
 
 async function findRestaurantBySlug(slug) {
@@ -370,9 +492,9 @@ async function handleRegister(request, response) {
   const password = String(input.password || "");
   const settings = {
     name: String(input.name || "").trim(),
-    openingTime: String(input.openingTime || "11:30"),
-    closingTime: String(input.closingTime || "14:30"),
-    maxPartySize: Number(input.maxPartySize || 20)
+    servicePeriods: servicePeriodsFromInput(input, true),
+    maxPartySize: Number(input.maxPartySize || 20),
+    timeSlotCapacity: Number(input.timeSlotCapacity || input.maxGuestsPerTime || input.maxPartySize || 20)
   };
   const settingsError = validateRestaurantSettings(settings);
   const passwordError = validatePassword(password);
@@ -405,9 +527,11 @@ async function handleRegister(request, response) {
       passwordHash: passwordFields.passwordHash,
       address: String(input.address || settings.name).trim().slice(0, 160),
       googleMapsQuery: String(input.googleMapsQuery || settings.name + " restaurant").trim().slice(0, 160),
-      openingTime: settings.openingTime,
-      closingTime: settings.closingTime,
+      openingTime: settings.servicePeriods[0].openingTime,
+      closingTime: settings.servicePeriods[settings.servicePeriods.length - 1].closingTime,
+      servicePeriods: settings.servicePeriods,
       maxPartySize: settings.maxPartySize,
+      timeSlotCapacity: settings.timeSlotCapacity,
       plan: "TenSeat",
       priceMonthly: 10,
       currency: "AUD",
@@ -450,9 +574,9 @@ async function handleUpdateRestaurant(request, response) {
   if (!input) return;
   const settings = {
     name: String(input.name || "").trim(),
-    openingTime: String(input.openingTime || ""),
-    closingTime: String(input.closingTime || ""),
-    maxPartySize: Number(input.maxPartySize)
+    servicePeriods: servicePeriodsFromInput(input, false),
+    maxPartySize: Number(input.maxPartySize),
+    timeSlotCapacity: Number(input.timeSlotCapacity || input.maxGuestsPerTime || input.maxPartySize)
   };
   const settingsError = validateRestaurantSettings(settings);
   if (settingsError) return sendJson(response, 400, { ok: false, error: settingsError });
@@ -465,9 +589,11 @@ async function handleUpdateRestaurant(request, response) {
     restaurant.name = settings.name;
     restaurant.address = String(input.address || settings.name).trim().slice(0, 160);
     restaurant.googleMapsQuery = String(input.googleMapsQuery || settings.name + " restaurant").trim().slice(0, 160);
-    restaurant.openingTime = settings.openingTime;
-    restaurant.closingTime = settings.closingTime;
+    restaurant.openingTime = settings.servicePeriods[0].openingTime;
+    restaurant.closingTime = settings.servicePeriods[settings.servicePeriods.length - 1].closingTime;
+    restaurant.servicePeriods = settings.servicePeriods;
     restaurant.maxPartySize = settings.maxPartySize;
+    restaurant.timeSlotCapacity = settings.timeSlotCapacity;
     restaurant.updatedAt = new Date().toISOString();
     updated = restaurant;
     await writeArray(RESTAURANTS_FILE, restaurants);
@@ -510,32 +636,39 @@ async function handleCreateBooking(request, response, restaurant) {
   if (!input) return;
   const validationError = validateBooking(input, restaurant);
   if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
-  const booking = {
-    id: crypto.randomUUID(),
-    code: "C" + crypto.randomBytes(8).toString("hex").toUpperCase(),
-    restaurantId: restaurant.id,
-    restaurant: restaurant.name,
-    date: String(input.date),
-    name: String(input.name).trim(),
-    time: String(input.time),
-    partySize: Number(input.partySize),
-    status: "confirmed",
-    createdAt: new Date().toISOString()
-  };
+  let booking;
+  let fullError = "";
   dataWriteQueue = dataWriteQueue.then(async function () {
     const bookings = await readArray(BOOKINGS_FILE);
+    fullError = capacityError(input, restaurant, bookings);
+    if (fullError) return;
+    booking = {
+      id: crypto.randomUUID(),
+      code: makeBookingCode(bookings),
+      restaurantId: restaurant.id,
+      restaurant: restaurant.name,
+      date: String(input.date),
+      name: String(input.name).trim(),
+      time: String(input.time),
+      partySize: Number(input.partySize),
+      notes: normalizeNotes(input.notes),
+      source: "customer",
+      status: "confirmed",
+      createdAt: new Date().toISOString()
+    };
     bookings.push(booking);
     await writeArray(BOOKINGS_FILE, bookings);
   });
   await dataWriteQueue;
-  sendJson(response, 201, { ok: true, booking: booking });
+  if (fullError) return sendJson(response, 409, { ok: false, error: fullError });
+  sendJson(response, 201, { ok: true, booking: bookingResponse(booking) });
 }
 
 async function handleCancelBooking(request, response, restaurant) {
   const input = await parseBody(request, response);
   if (!input) return;
   const code = String(input.code || "").trim().toUpperCase();
-  if (!/^C[A-F0-9]{6,16}$/.test(code)) {
+  if (!/^(C[A-F0-9]{6,16}|TS-[A-Z0-9]{6})$/.test(code)) {
     return sendJson(response, 400, { ok: false, error: "请填写有效的预订编号" });
   }
   let outcome = "not_found";
@@ -559,7 +692,77 @@ async function handleCancelBooking(request, response, restaurant) {
   await dataWriteQueue;
   if (outcome === "not_found") return sendJson(response, 404, { ok: false, error: "找不到这个预订编号" });
   if (outcome === "already_cancelled") return sendJson(response, 409, { ok: false, error: "这笔预订已经取消" });
-  sendJson(response, 200, { ok: true, booking: cancelledBooking });
+  sendJson(response, 200, { ok: true, booking: bookingResponse(cancelledBooking) });
+}
+
+async function handleOwnerCreateBooking(request, response) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const validationError = validateBooking(input, restaurant);
+  if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
+
+  let booking;
+  let fullError = "";
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const bookings = await readArray(BOOKINGS_FILE);
+    fullError = capacityError(input, restaurant, bookings);
+    if (fullError) return;
+    booking = {
+      id: crypto.randomUUID(),
+      code: makeBookingCode(bookings),
+      restaurantId: restaurant.id,
+      restaurant: restaurant.name,
+      date: String(input.date),
+      name: String(input.name).trim(),
+      time: String(input.time),
+      partySize: Number(input.partySize),
+      notes: normalizeNotes(input.notes),
+      source: "owner",
+      status: "confirmed",
+      createdAt: new Date().toISOString()
+    };
+    bookings.push(booking);
+    await writeArray(BOOKINGS_FILE, bookings);
+  });
+  await dataWriteQueue;
+  if (fullError) return sendJson(response, 409, { ok: false, error: fullError });
+  sendJson(response, 201, { ok: true, booking: bookingResponse(booking) });
+}
+
+async function handleOwnerUpdateBooking(request, response, code) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "请重新登录" });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const nextStatus = String(input.status || "").trim();
+  if (!["confirmed", "cancelled", "no_show"].includes(nextStatus)) {
+    return sendJson(response, 400, { ok: false, error: "请选择有效的预订状态" });
+  }
+
+  let updated;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const bookings = await readArray(BOOKINGS_FILE);
+    const booking = bookings.find(function (candidate) {
+      return candidate.restaurantId === restaurant.id &&
+        String(candidate.code || "").toUpperCase() === String(code || "").toUpperCase();
+    });
+    if (!booking) return;
+    booking.status = nextStatus;
+    if (nextStatus === "cancelled") booking.cancelledAt = new Date().toISOString();
+    if (nextStatus === "no_show") booking.noShowAt = new Date().toISOString();
+    if (nextStatus === "confirmed") {
+      delete booking.cancelledAt;
+      delete booking.noShowAt;
+    }
+    booking.updatedAt = new Date().toISOString();
+    updated = booking;
+    await writeArray(BOOKINGS_FILE, bookings);
+  });
+  await dataWriteQueue;
+  if (!updated) return sendJson(response, 404, { ok: false, error: "找不到这笔预订" });
+  sendJson(response, 200, { ok: true, booking: bookingResponse(updated) });
 }
 
 async function handleOwnerBookings(request, response, requestUrl) {
@@ -575,15 +778,18 @@ async function handleOwnerBookings(request, response, requestUrl) {
     .sort(function (left, right) {
       return left.time.localeCompare(right.time) || String(left.createdAt).localeCompare(String(right.createdAt));
     });
-  const active = bookings.filter(function (booking) { return booking.status !== "cancelled"; });
+  const active = bookings.filter(activeBooking);
+  const cancelled = bookings.filter(function (booking) { return booking.status === "cancelled"; });
+  const noShows = bookings.filter(function (booking) { return booking.status === "no_show"; });
   sendJson(response, 200, {
     ok: true,
     date: requestedDate,
-    bookings: bookings,
+    bookings: bookings.map(bookingResponse),
     summary: {
       bookingCount: active.length,
       guestCount: active.reduce(function (total, booking) { return total + booking.partySize; }, 0),
-      cancelledCount: bookings.length - active.length
+      cancelledCount: cancelled.length,
+      noShowCount: noShows.length
     }
   });
 }
@@ -637,6 +843,7 @@ async function route(request, response) {
   const requestUrl = new URL(request.url, "http://localhost");
   const pathname = requestUrl.pathname;
   const restaurantMatch = pathname.match(/^\/api\/restaurants\/([a-z0-9-]+)(?:\/(bookings|cancel))?$/);
+  const ownerBookingMatch = pathname.match(/^\/api\/owner\/bookings\/([A-Z0-9-]+)$/i);
 
   if (pathname.startsWith("/api/") && enforceRateLimit(request, response, "api", RATE_LIMIT_RULES.api)) return;
 
@@ -655,6 +862,8 @@ async function route(request, response) {
   if (request.method === "PATCH" && pathname === "/api/owner/me") return handleUpdateRestaurant(request, response);
   if (request.method === "POST" && pathname === "/api/owner/change-password") return handleChangePassword(request, response);
   if (request.method === "GET" && pathname === "/api/owner/bookings") return handleOwnerBookings(request, response, requestUrl);
+  if (request.method === "POST" && pathname === "/api/owner/bookings") return handleOwnerCreateBooking(request, response);
+  if (request.method === "PATCH" && ownerBookingMatch) return handleOwnerUpdateBooking(request, response, ownerBookingMatch[1]);
 
   if (restaurantMatch) {
     const restaurant = await findRestaurantBySlug(restaurantMatch[1]);
@@ -714,7 +923,9 @@ async function ensureData() {
       googleMapsQuery: "Chirin restaurant",
       openingTime: "11:30",
       closingTime: "14:30",
+      servicePeriods: [{ openingTime: "11:30", closingTime: "14:30" }],
       maxPartySize: 20,
+      timeSlotCapacity: 20,
       plan: "TenSeat",
       priceMonthly: 10,
       currency: "AUD",
@@ -736,6 +947,26 @@ async function ensureData() {
     chirin.mustChangePassword = false;
     restaurantsChanged = true;
   }
+  restaurants.forEach(function (restaurant) {
+    const periods = servicePeriodsFor(restaurant);
+    if (!Array.isArray(restaurant.servicePeriods) || !restaurant.servicePeriods.length) {
+      restaurant.servicePeriods = periods;
+      restaurantsChanged = true;
+    }
+    if (restaurant.openingTime !== periods[0].openingTime) {
+      restaurant.openingTime = periods[0].openingTime;
+      restaurantsChanged = true;
+    }
+    if (restaurant.closingTime !== periods[periods.length - 1].closingTime) {
+      restaurant.closingTime = periods[periods.length - 1].closingTime;
+      restaurantsChanged = true;
+    }
+    if (!Number.isInteger(Number(restaurant.timeSlotCapacity)) ||
+        Number(restaurant.timeSlotCapacity) < Number(restaurant.maxPartySize || 1)) {
+      restaurant.timeSlotCapacity = Math.max(Number(restaurant.maxPartySize || 1), 20);
+      restaurantsChanged = true;
+    }
+  });
   if (restaurantsChanged || !(await fileExists(RESTAURANTS_FILE))) await writeArray(RESTAURANTS_FILE, restaurants);
 
   const bookings = await readArray(BOOKINGS_FILE);

@@ -21,8 +21,15 @@ npm start
 ## 已完成的功能
 
 - 每家餐馆独立注册、登录和预约链接
-- 客人选择日期、姓名、人数和 11:30-14:30 的 24 小时制预约时间
+- 客人选择日期、姓名、人数和餐馆可预约范围内的 24 小时制时间
+- 餐馆可设置 1 个或 2 个营业时间段，例如午餐 `11:30-14:30`、晚餐 `17:00-21:00`
+- 每家餐馆的客人页会按后台地址或 Google Maps 搜索内容更新地图位置
 - 单次预约人数上限可配置，Chirin 当前为 20 人
+- 同一时间最多接待人数可配置，系统会阻止超订
+- 客人可填写备注，餐馆端可查看过敏、生日、儿童椅等信息
+- 餐馆端可手动新增电话/现场预订
+- 餐馆端可取消预订、标记 No-show、恢复预订
+- 新预订编号使用更短的格式，例如 `TS-8K42PA`
 - 预约成功后显示预订编号，并提醒客人复制保存
 - 客人用预订编号取消预约
 - 餐馆端查看预约、客人人数、取消记录和预订编号
@@ -67,3 +74,27 @@ DATA_DIR=/var/data/tenseat
 5. 确认服务带有持久硬盘，挂载路径是 `/var/data/tenseat`。
 6. 部署完成后打开 `/r/chirin` 测试客人预约，打开 `/owner` 测试餐馆后台。
 7. 给餐馆修改默认密码，再把餐馆链接放到 Google Business Profile。
+
+## 本地测试数据
+
+本地开发数据里包含两个测试餐馆：
+
+- `http://127.0.0.1:8795/r/test-cafe`：一个营业时间段，地图位置为 Sydney Opera House。
+- `http://127.0.0.1:8795/r/split-shift-bistro`：两个营业时间段，地图位置为 Adelaide Central Market。
+
+测试后台账号：
+
+- `test.cafe@example.com` / `TestCafe123`
+- `split.bistro@example.com` / `SplitBistro123`
+
+重新建立测试数据：
+
+```powershell
+npm run seed:test
+```
+
+给线上 Render 版本建立测试数据：
+
+```powershell
+$env:BASE_URL="https://tenseat-booking-system.onrender.com"; npm run seed:test
+```

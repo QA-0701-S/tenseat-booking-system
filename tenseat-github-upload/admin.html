@@ -85,7 +85,21 @@
             <div class="metric"><span>有效预订</span><strong id="bookingCount">0</strong></div>
             <div class="metric"><span>客人</span><strong id="guestCount">0</strong></div>
             <div class="metric"><span>已取消</span><strong id="cancelledCount">0</strong></div>
+            <div class="metric"><span>No-show</span><strong id="noShowCount">0</strong></div>
             <div class="metric service-metric"><span>营业时段</span><strong id="serviceTime">--:--–--:--</strong></div>
+          </section>
+
+          <section class="manual-booking-section" aria-labelledby="manualBookingTitle">
+            <header class="section-header compact-header">
+              <div><h2 id="manualBookingTitle">手动新增预订</h2><p>电话或现场预订可以直接加入当天列表。</p></div>
+            </header>
+            <form id="ownerBookingForm" class="owner-booking-form">
+              <label class="field compact-field"><span>姓名</span><input id="ownerGuestName" type="text" maxlength="80" required /></label>
+              <label class="field compact-field"><span>时间</span><input id="ownerBookingTime" type="time" required /></label>
+              <label class="field compact-field"><span>人数</span><input id="ownerPartySize" type="number" min="1" max="100" required /></label>
+              <label class="field compact-field full-field"><span>备注（可选）</span><textarea id="ownerBookingNotes" maxlength="300" rows="2"></textarea></label>
+              <button class="primary-button owner-booking-submit" type="submit">新增预订</button>
+            </form>
           </section>
 
           <section class="bookings-section" aria-labelledby="listTitle">
@@ -95,7 +109,7 @@
             </header>
             <div class="table-wrap" id="tableWrap">
               <table>
-                <thead><tr><th>姓名</th><th>时间</th><th>人数</th><th>状态</th><th>预订编号</th><th>收到时间</th></tr></thead>
+                <thead><tr><th>姓名</th><th>时间</th><th>人数</th><th>状态</th><th>备注</th><th>预订编号</th><th>收到时间</th><th>操作</th></tr></thead>
                 <tbody id="bookingRows"></tbody>
               </table>
             </div>
@@ -128,6 +142,11 @@
               <button class="quiet-button" id="copyLinkButton" type="button">复制链接</button>
               <a class="quiet-link" id="openBookingLink" href="#" target="_blank" rel="noreferrer">打开</a>
             </div>
+            <div class="google-guide">
+              <strong>Google Business Profile</strong>
+              <span>把上面的预约链接放进商家资料的 Booking / Appointment link，客人就能从 Google 地图进入预约页。</span>
+              <a href="https://support.google.com/business/answer/6218037" target="_blank" rel="noreferrer">查看 Google 指引</a>
+            </div>
           </section>
 
           <section class="settings-section">
@@ -136,9 +155,20 @@
               <label class="field compact-field"><span>餐馆名称</span><input id="settingsName" type="text" maxlength="80" required /></label>
               <label class="field compact-field"><span>地址</span><input id="settingsAddress" type="text" maxlength="160" required /></label>
               <label class="field compact-field full-field"><span>Google Maps 搜索名称或地址</span><input id="settingsMapQuery" type="text" maxlength="160" required /></label>
-              <label class="field compact-field"><span>开始营业</span><input id="settingsOpening" type="time" required /></label>
-              <label class="field compact-field"><span>结束营业</span><input id="settingsClosing" type="time" required /></label>
+              <div class="service-period-editor full-field">
+                <div class="period-row">
+                  <strong>时间段 1</strong>
+                  <label class="field compact-field"><span>开始营业</span><input id="settingsOpening" type="time" required /></label>
+                  <label class="field compact-field"><span>结束营业</span><input id="settingsClosing" type="time" required /></label>
+                </div>
+                <div class="period-row">
+                  <strong>时间段 2（可选）</strong>
+                  <label class="field compact-field"><span>开始营业</span><input id="settingsOpening2" type="time" /></label>
+                  <label class="field compact-field"><span>结束营业</span><input id="settingsClosing2" type="time" /></label>
+                </div>
+              </div>
               <label class="field compact-field"><span>单次预约人数上限</span><input id="settingsMaxParty" type="number" min="1" max="100" required /></label>
+              <label class="field compact-field"><span>同一时间最多接待人数</span><input id="settingsTimeSlotCapacity" type="number" min="1" max="500" required /></label>
               <button class="primary-button settings-submit" type="submit">保存设置</button>
             </form>
           </section>

@@ -17,6 +17,7 @@ var el = {
   form: document.getElementById("bookingForm"),
   date: document.getElementById("bookingDate"),
   name: document.getElementById("bookingName"),
+  notes: document.getElementById("bookingNotes"),
   hour: document.getElementById("bookingHour"),
   minute: document.getElementById("bookingMinute"),
   time: document.getElementById("bookingTime"),
@@ -79,7 +80,7 @@ function applyRestaurant() {
   document.title = restaurant.name + " Booking · TenSeat";
   el.restaurantName.textContent = restaurant.name;
   el.restaurantAddress.textContent = restaurant.address || restaurant.name;
-  el.timeRange.textContent = restaurant.openingTime + "-" + restaurant.closingTime;
+  el.timeRange.textContent = formatServicePeriods();
   var mapQuery = encodeURIComponent(restaurant.googleMapsQuery || restaurant.address || restaurant.name);
   el.googleMap.src = "https://www.google.com/maps?q=" + mapQuery + "&output=embed";
   el.openMaps.href = "https://www.google.com/maps/search/?api=1&query=" + mapQuery;
@@ -88,6 +89,7 @@ function applyRestaurant() {
 function wireEvents() {
   el.date.addEventListener("change", handleDateChange);
   el.name.addEventListener("input", updateSummary);
+  el.notes.addEventListener("input", updateSummary);
   el.hour.addEventListener("change", handleHourChange);
   el.minute.addEventListener("change", syncTimeFromPicker);
   el.partySize.addEventListener("change", updateSummary);
@@ -110,12 +112,9 @@ function populatePartySizes() {
 
 function populateHourOptions() {
   el.hour.replaceChildren(createOption("", "--"));
-  var firstHour = Math.floor(toMinutes(restaurant.openingTime) / 60);
-  var lastHour = Math.floor(toMinutes(restaurant.closingTime) / 60);
-  for (var hour = firstHour; hour <= lastHour; hour += 1) {
-    var value = String(hour).padStart(2, "0");
-    el.hour.appendChild(createOption(value, value));
-  }
+  getBookableHours().forEach(function (hour) {
+    el.hour.appendChild(createOption(String(hour).padStart(2, "0"), String(hour).padStart(2, "0")));
+  });
 }
 
 function createOption(value, label) {
@@ -140,20 +139,17 @@ function populateMinuteOptions(preferredMinute) {
   el.minute.replaceChildren(createOption("", "--"));
   if (!el.hour.value) return;
 
-  var opening = restaurant.openingTime.split(":").map(Number);
-  var closing = restaurant.closingTime.split(":").map(Number);
-  var firstMinute = hour === opening[0] ? opening[1] : 0;
-  var lastMinute = hour === closing[0] ? closing[1] : 59;
-  for (var minute = firstMinute; minute <= lastMinute; minute += 1) {
+  var minutes = getBookableMinutesForHour(hour);
+  minutes.forEach(function (minute) {
     var value = String(minute).padStart(2, "0");
     el.minute.appendChild(createOption(value, value));
-  }
+  });
 
   var preferredNumber = Number(preferredMinute);
-  if (preferredMinute !== "" && preferredNumber >= firstMinute && preferredNumber <= lastMinute) {
+  if (preferredMinute !== "" && minutes.includes(preferredNumber)) {
     el.minute.value = String(preferredNumber).padStart(2, "0");
-  } else {
-    el.minute.value = String(firstMinute).padStart(2, "0");
+  } else if (minutes.length) {
+    el.minute.value = String(minutes[0]).padStart(2, "0");
   }
 }
 
@@ -202,7 +198,7 @@ function getTimeValidationMessage() {
   if (!restaurant) return "餐馆信息正在加载";
   if (!el.time.value) return "请选择预约时间";
   if (!isTimeWithinRange(el.time.value)) {
-    return "时间必须在 " + restaurant.openingTime + " 到 " + restaurant.closingTime + " 之间";
+    return "时间必须在 " + formatServicePeriods() + " 之间";
   }
   if (isSelectedTimeInPast()) return "这个时间已经过去，请换一个时间或日期";
   return "";
@@ -224,6 +220,7 @@ async function handleBookingSubmit(event) {
       body: JSON.stringify({
         date: el.date.value,
         name: el.name.value.trim(),
+        notes: el.notes.value.trim(),
         partySize: Number(el.partySize.value),
         time: el.time.value
       })
@@ -253,6 +250,7 @@ function saveBookingReceipt(booking, status) {
     code: booking.code,
     date: booking.date,
     name: booking.name,
+    notes: booking.notes || "",
     time: booking.time,
     partySize: booking.partySize,
     status: status
@@ -283,7 +281,8 @@ function showBookingReceipt(booking, status) {
     booking.name,
     booking.date,
     booking.time,
-    booking.partySize + " 人"
+    booking.partySize + " 人",
+    booking.notes ? "备注：" + booking.notes : ""
   ].filter(Boolean).join(" · ");
   el.receiptState.textContent = status === "cancelled" ? "已取消" : "已确认";
 }
@@ -358,8 +357,10 @@ function updateSummary() {
 }
 
 function isTimeWithinRange(time) {
-  return toMinutes(time) >= toMinutes(restaurant.openingTime) &&
-    toMinutes(time) <= toMinutes(restaurant.closingTime);
+  var value = toMinutes(time);
+  return servicePeriods().some(function (period) {
+    return value >= toMinutes(period.openingTime) && value <= toMinutes(period.closingTime);
+  });
 }
 
 function isSelectedTimeInPast() {
@@ -369,22 +370,67 @@ function isSelectedTimeInPast() {
 
 function getSuggestedTime() {
   var today = toDateInput(new Date());
-  if (el.date.value && el.date.value !== today) return restaurant.openingTime;
+  var periods = servicePeriods();
+  if (el.date.value && el.date.value !== today) return periods[0].openingTime;
   var now = new Date();
   var nowMinutes = now.getHours() * 60 + now.getMinutes();
-  var start = toMinutes(restaurant.openingTime);
-  var end = toMinutes(restaurant.closingTime);
-  if (nowMinutes < start) return restaurant.openingTime;
-  if (nowMinutes >= end) return "";
-  return fromMinutes(nowMinutes + 1);
+  for (var index = 0; index < periods.length; index += 1) {
+    var start = toMinutes(periods[index].openingTime);
+    var end = toMinutes(periods[index].closingTime);
+    if (nowMinutes < start) return periods[index].openingTime;
+    if (nowMinutes >= start && nowMinutes < end) return fromMinutes(nowMinutes + 1);
+  }
+  return "";
 }
 
 function updateOpenStatus() {
   var now = new Date();
   var nowMinutes = now.getHours() * 60 + now.getMinutes();
-  var open = nowMinutes >= toMinutes(restaurant.openingTime) && nowMinutes < toMinutes(restaurant.closingTime);
+  var open = servicePeriods().some(function (period) {
+    return nowMinutes >= toMinutes(period.openingTime) && nowMinutes < toMinutes(period.closingTime);
+  });
   el.openStatus.textContent = open ? "Open" : "Closed";
   el.openStatus.style.color = open ? "var(--green)" : "var(--coral)";
+}
+
+function servicePeriods() {
+  var periods = Array.isArray(restaurant.servicePeriods) && restaurant.servicePeriods.length
+    ? restaurant.servicePeriods
+    : [{ openingTime: restaurant.openingTime, closingTime: restaurant.closingTime }];
+  return periods.filter(function (period) {
+    return period.openingTime && period.closingTime;
+  }).sort(function (left, right) {
+    return toMinutes(left.openingTime) - toMinutes(right.openingTime);
+  });
+}
+
+function formatServicePeriods() {
+  return servicePeriods().map(function (period) {
+    return period.openingTime + "-" + period.closingTime;
+  }).join(" / ");
+}
+
+function getBookableHours() {
+  var hours = new Set();
+  servicePeriods().forEach(function (period) {
+    var firstHour = Math.floor(toMinutes(period.openingTime) / 60);
+    var lastHour = Math.floor(toMinutes(period.closingTime) / 60);
+    for (var hour = firstHour; hour <= lastHour; hour += 1) hours.add(hour);
+  });
+  return Array.from(hours).sort(function (left, right) { return left - right; });
+}
+
+function getBookableMinutesForHour(hour) {
+  var minutes = [];
+  for (var minute = 0; minute < 60; minute += 1) {
+    var value = hour * 60 + minute;
+    if (servicePeriods().some(function (period) {
+      return value >= toMinutes(period.openingTime) && value <= toMinutes(period.closingTime);
+    })) {
+      minutes.push(minute);
+    }
+  }
+  return minutes;
 }
 
 function formatBookingDate(value) {

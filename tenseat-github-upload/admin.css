@@ -305,6 +305,37 @@ input:focus-visible {
   background: var(--surface);
 }
 
+.manual-booking-section {
+  margin-top: 24px;
+  border-top: 3px solid var(--green);
+  background: var(--surface);
+}
+
+.compact-header {
+  min-height: auto;
+}
+
+.owner-booking-form {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 0.7fr;
+  gap: 2px 16px;
+  padding: 8px 22px 24px;
+  border: 1px solid var(--line);
+  border-top: 0;
+}
+
+.owner-booking-form textarea {
+  min-height: 72px;
+}
+
+.owner-booking-submit {
+  width: auto;
+  min-width: 140px;
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0 24px;
+}
+
 .section-header {
   min-height: 80px;
   display: flex;
@@ -586,14 +617,58 @@ tbody tr:hover {
   background: var(--coral-soft);
 }
 
+.booking-status.no_show {
+  color: #7a4b00;
+  background: #fff1cf;
+}
+
 .cancelled-row {
   background: #fbf7f5;
 }
 
 .cancelled-row .time-value,
-.cancelled-row .guest-name {
+.cancelled-row .guest-name,
+.no-show-row .time-value,
+.no-show-row .guest-name {
   color: var(--muted);
   text-decoration: line-through;
+}
+
+.booking-notes {
+  display: inline-block;
+  max-width: 180px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-action {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.table-action:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.table-action.danger:hover {
+  border-color: var(--coral);
+  color: var(--coral);
 }
 
 .access-panel {
@@ -647,7 +722,7 @@ tbody tr:hover {
 }
 
 .summary-band {
-  grid-template-columns: 1fr 1fr 1fr 2fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr 2fr;
 }
 
 .security-alert {
@@ -744,6 +819,27 @@ tbody tr:hover {
   background: #f8faf8;
 }
 
+.google-guide {
+  display: grid;
+  gap: 7px;
+  padding: 0 22px 22px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.google-guide strong {
+  color: var(--ink);
+}
+
+.google-guide a {
+  width: fit-content;
+  color: var(--green);
+  font-weight: 800;
+}
+
 .quiet-link {
   min-height: 36px;
   display: inline-flex;
@@ -768,6 +864,32 @@ tbody tr:hover {
 
 .settings-form {
   grid-template-columns: 1fr 1fr;
+}
+
+.service-period-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.period-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  gap: 14px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.period-row strong {
+  align-self: center;
+  font-size: 14px;
+}
+
+.period-row .compact-field {
+  margin-top: 0;
 }
 
 .password-form {
@@ -811,7 +933,12 @@ tbody tr:hover {
   }
 
   .settings-form,
-  .password-form {
+  .password-form,
+  .owner-booking-form {
+    grid-template-columns: 1fr;
+  }
+
+  .period-row {
     grid-template-columns: 1fr;
   }
 
@@ -821,7 +948,8 @@ tbody tr:hover {
   }
 
   .password-submit,
-  .settings-submit {
+  .settings-submit,
+  .owner-booking-submit {
     width: 100%;
   }
 }
