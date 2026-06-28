@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: tenseat-booking-system
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: tenseat-data
+      mountPath: /var/data/tenseat
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: true
+      - key: DATA_DIR
+        value: /var/data/tenseat
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PUBLIC_ORIGIN
+        sync: false

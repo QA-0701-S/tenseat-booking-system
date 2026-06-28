@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TenSeat Restaurant</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <section class="access-shell" id="accessView" aria-labelledby="accessTitle">
+      <div class="access-panel">
+        <div class="brand-mark" aria-hidden="true">T</div>
+        <p class="eyebrow">TENSEAT · A$10/MONTH</p>
+        <h1 id="accessTitle">餐馆后台</h1>
+
+        <div class="auth-tabs" role="tablist" aria-label="账户">
+          <button class="auth-tab active" id="loginTab" type="button" role="tab" aria-selected="true">登录</button>
+          <button class="auth-tab" id="registerTab" type="button" role="tab" aria-selected="false">注册餐馆</button>
+        </div>
+
+        <form id="loginForm" class="auth-form">
+          <label class="field compact-field">
+            <span>邮箱</span>
+            <input id="loginEmail" type="email" autocomplete="email" required />
+          </label>
+          <label class="field compact-field">
+            <span>密码</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <p class="form-error" id="loginError" role="alert"></p>
+          <button class="primary-button" type="submit">登录</button>
+        </form>
+
+        <form id="registerForm" class="auth-form" hidden>
+          <label class="field compact-field">
+            <span>餐馆名称</span>
+            <input id="registerName" type="text" maxlength="80" autocomplete="organization" required />
+          </label>
+          <label class="field compact-field">
+            <span>登录邮箱</span>
+            <input id="registerEmail" type="email" autocomplete="email" required />
+          </label>
+          <label class="field compact-field">
+            <span>密码（至少8位，包含字母和数字）</span>
+            <input id="registerPassword" type="password" minlength="8" autocomplete="new-password" required />
+          </label>
+          <p class="form-error" id="registerError" role="alert"></p>
+          <button class="primary-button" type="submit">创建餐馆账户</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="admin-app" id="adminApp" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark small" aria-hidden="true">T</span>
+          <span class="brand-name">TenSeat</span>
+          <span class="brand-section" id="topbarRestaurant">Restaurant</span>
+        </div>
+        <button class="quiet-button" id="logoutButton" type="button">退出</button>
+      </header>
+
+      <div class="dashboard">
+        <nav class="view-tabs" aria-label="餐馆后台页面">
+          <button class="view-tab active" id="bookingsTab" type="button">预订</button>
+          <button class="view-tab" id="settingsTab" type="button">餐馆设置</button>
+        </nav>
+
+        <section id="bookingsView">
+          <section class="page-heading">
+            <div>
+              <p class="eyebrow">RESERVATIONS</p>
+              <h1 id="restaurantHeading">预订安排</h1>
+            </div>
+            <div class="date-controls">
+              <label class="date-field">
+                <span>日期</span>
+                <input id="bookingDate" type="date" />
+              </label>
+              <button class="icon-button" id="refreshButton" type="button" aria-label="刷新预订" title="刷新预订">↻</button>
+            </div>
+          </section>
+
+          <section class="summary-band" aria-label="预订概况">
+            <div class="metric"><span>有效预订</span><strong id="bookingCount">0</strong></div>
+            <div class="metric"><span>客人</span><strong id="guestCount">0</strong></div>
+            <div class="metric"><span>已取消</span><strong id="cancelledCount">0</strong></div>
+            <div class="metric service-metric"><span>营业时段</span><strong id="serviceTime">--:--–--:--</strong></div>
+          </section>
+
+          <section class="bookings-section" aria-labelledby="listTitle">
+            <header class="section-header">
+              <div><h2 id="listTitle">今日预订</h2><p id="lastUpdated">尚未刷新</p></div>
+              <span class="live-status"><i aria-hidden="true"></i>已连接</span>
+            </header>
+            <div class="table-wrap" id="tableWrap">
+              <table>
+                <thead><tr><th>姓名</th><th>时间</th><th>人数</th><th>状态</th><th>预订编号</th><th>收到时间</th></tr></thead>
+                <tbody id="bookingRows"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="emptyState" hidden>
+              <span class="empty-symbol" aria-hidden="true">✓</span>
+              <h3>这一天还没有预订</h3>
+            </div>
+          </section>
+        </section>
+
+        <section id="settingsView" hidden>
+          <section class="page-heading settings-heading">
+            <div><p class="eyebrow">RESTAURANT</p><h1>餐馆设置</h1></div>
+          </section>
+
+          <section class="security-alert" id="securityAlert" hidden>
+            <strong>请先修改默认密码</strong>
+            <span>当前账号仍在使用临时密码。正式上线前必须换成只有你知道的新密码。</span>
+          </section>
+
+          <section class="plan-band">
+            <div><span>当前套餐</span><strong>TenSeat · A$10/月</strong></div>
+            <span class="plan-status" id="planStatus">试用中</span>
+          </section>
+
+          <section class="settings-section">
+            <header><h2>专属预约链接</h2></header>
+            <div class="link-control">
+              <input id="bookingLink" type="text" readonly />
+              <button class="quiet-button" id="copyLinkButton" type="button">复制链接</button>
+              <a class="quiet-link" id="openBookingLink" href="#" target="_blank" rel="noreferrer">打开</a>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <header><h2>餐馆资料</h2></header>
+            <form id="settingsForm" class="settings-form">
+              <label class="field compact-field"><span>餐馆名称</span><input id="settingsName" type="text" maxlength="80" required /></label>
+              <label class="field compact-field"><span>地址</span><input id="settingsAddress" type="text" maxlength="160" required /></label>
+              <label class="field compact-field full-field"><span>Google Maps 搜索名称或地址</span><input id="settingsMapQuery" type="text" maxlength="160" required /></label>
+              <label class="field compact-field"><span>开始营业</span><input id="settingsOpening" type="time" required /></label>
+              <label class="field compact-field"><span>结束营业</span><input id="settingsClosing" type="time" required /></label>
+              <label class="field compact-field"><span>单次预约人数上限</span><input id="settingsMaxParty" type="number" min="1" max="100" required /></label>
+              <button class="primary-button settings-submit" type="submit">保存设置</button>
+            </form>
+          </section>
+
+          <section class="settings-section">
+            <header><h2>修改密码</h2></header>
+            <form id="passwordForm" class="password-form">
+              <label class="field compact-field"><span>当前密码</span><input id="currentPassword" type="password" autocomplete="current-password" required /></label>
+              <label class="field compact-field"><span>新密码（至少8位，包含字母和数字）</span><input id="newPassword" type="password" minlength="8" autocomplete="new-password" required /></label>
+              <button class="quiet-button password-submit" type="submit">更新密码</button>
+            </form>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <div class="toast" id="adminToast" role="status" aria-live="polite"></div>
+    <script src="/admin.js"></script>
+  </body>
+</html>

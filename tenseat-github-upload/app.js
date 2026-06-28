@@ -1,0 +1,419 @@
+var isFilePreview = window.location.protocol === "file:";
+var isLocalPreview = isFilePreview ||
+  window.location.hostname === "127.0.0.1" ||
+  window.location.hostname === "localhost";
+var API_BASE = isFilePreview ? "http://127.0.0.1:8795" : "";
+var restaurantSlug = getRestaurantSlug();
+var restaurant = null;
+var submitting = false;
+var cancelling = false;
+
+var el = {
+  restaurantName: document.getElementById("restaurantName"),
+  restaurantAddress: document.getElementById("restaurantAddress"),
+  googleMap: document.getElementById("googleMap"),
+  openMaps: document.getElementById("openMaps"),
+  openStatus: document.getElementById("openStatus"),
+  form: document.getElementById("bookingForm"),
+  date: document.getElementById("bookingDate"),
+  name: document.getElementById("bookingName"),
+  hour: document.getElementById("bookingHour"),
+  minute: document.getElementById("bookingMinute"),
+  time: document.getElementById("bookingTime"),
+  timeRange: document.getElementById("timeRange"),
+  timeStatus: document.getElementById("timeStatus"),
+  partySize: document.getElementById("partySize"),
+  summary: document.getElementById("bookingSummary"),
+  submit: document.getElementById("submitBooking"),
+  toast: document.getElementById("toast"),
+  cancelForm: document.getElementById("cancelForm"),
+  cancelCode: document.getElementById("cancelCode"),
+  cancelSubmit: document.getElementById("cancelBooking"),
+  cancelStatus: document.getElementById("cancelStatus"),
+  receipt: document.getElementById("bookingReceipt"),
+  receiptTitle: document.getElementById("receiptTitle"),
+  receiptCode: document.getElementById("receiptCode"),
+  receiptReminder: document.getElementById("receiptReminder"),
+  receiptDetails: document.getElementById("receiptDetails"),
+  receiptState: document.getElementById("receiptState"),
+  copyCode: document.getElementById("copyBookingCode")
+};
+
+init();
+
+async function init() {
+  wireEvents();
+  try {
+    var response = await fetch(API_BASE + "/api/restaurants/" + encodeURIComponent(restaurantSlug));
+    var result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "无法读取餐馆信息");
+    restaurant = result.restaurant;
+    applyRestaurant();
+
+    var today = toDateInput(new Date());
+    el.date.min = today;
+    el.date.value = today;
+    populatePartySizes();
+    populateHourOptions();
+    setTimeValue(getSuggestedTime());
+    updateOpenStatus();
+    updateAvailability();
+    loadSavedBooking();
+    updateCancelState();
+  } catch (error) {
+    el.summary.textContent = error.message;
+    el.timeStatus.textContent = "暂时无法预约";
+    el.submit.disabled = true;
+    showToast(error.message);
+  }
+}
+
+function getRestaurantSlug() {
+  var pathMatch = window.location.pathname.match(/^\/r\/([a-z0-9-]+)/i);
+  if (pathMatch) return pathMatch[1].toLowerCase();
+  var querySlug = new URLSearchParams(window.location.search).get("restaurant");
+  return querySlug ? querySlug.toLowerCase() : "chirin";
+}
+
+function applyRestaurant() {
+  document.title = restaurant.name + " Booking · TenSeat";
+  el.restaurantName.textContent = restaurant.name;
+  el.restaurantAddress.textContent = restaurant.address || restaurant.name;
+  el.timeRange.textContent = restaurant.openingTime + "-" + restaurant.closingTime;
+  var mapQuery = encodeURIComponent(restaurant.googleMapsQuery || restaurant.address || restaurant.name);
+  el.googleMap.src = "https://www.google.com/maps?q=" + mapQuery + "&output=embed";
+  el.openMaps.href = "https://www.google.com/maps/search/?api=1&query=" + mapQuery;
+}
+
+function wireEvents() {
+  el.date.addEventListener("change", handleDateChange);
+  el.name.addEventListener("input", updateSummary);
+  el.hour.addEventListener("change", handleHourChange);
+  el.minute.addEventListener("change", syncTimeFromPicker);
+  el.partySize.addEventListener("change", updateSummary);
+  el.form.addEventListener("submit", handleBookingSubmit);
+  el.cancelCode.addEventListener("input", updateCancelState);
+  el.cancelForm.addEventListener("submit", handleCancelSubmit);
+  el.copyCode.addEventListener("click", copyBookingCode);
+}
+
+function populatePartySizes() {
+  el.partySize.replaceChildren();
+  for (var size = 1; size <= restaurant.maxPartySize; size += 1) {
+    var option = document.createElement("option");
+    option.value = String(size);
+    option.textContent = size + " 人";
+    if (size === Math.min(2, restaurant.maxPartySize)) option.selected = true;
+    el.partySize.appendChild(option);
+  }
+}
+
+function populateHourOptions() {
+  el.hour.replaceChildren(createOption("", "--"));
+  var firstHour = Math.floor(toMinutes(restaurant.openingTime) / 60);
+  var lastHour = Math.floor(toMinutes(restaurant.closingTime) / 60);
+  for (var hour = firstHour; hour <= lastHour; hour += 1) {
+    var value = String(hour).padStart(2, "0");
+    el.hour.appendChild(createOption(value, value));
+  }
+}
+
+function createOption(value, label) {
+  var option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+function handleDateChange() {
+  setTimeValue(getSuggestedTime());
+  updateAvailability();
+}
+
+function handleHourChange() {
+  populateMinuteOptions("");
+  syncTimeFromPicker();
+}
+
+function populateMinuteOptions(preferredMinute) {
+  var hour = Number(el.hour.value);
+  el.minute.replaceChildren(createOption("", "--"));
+  if (!el.hour.value) return;
+
+  var opening = restaurant.openingTime.split(":").map(Number);
+  var closing = restaurant.closingTime.split(":").map(Number);
+  var firstMinute = hour === opening[0] ? opening[1] : 0;
+  var lastMinute = hour === closing[0] ? closing[1] : 59;
+  for (var minute = firstMinute; minute <= lastMinute; minute += 1) {
+    var value = String(minute).padStart(2, "0");
+    el.minute.appendChild(createOption(value, value));
+  }
+
+  var preferredNumber = Number(preferredMinute);
+  if (preferredMinute !== "" && preferredNumber >= firstMinute && preferredNumber <= lastMinute) {
+    el.minute.value = String(preferredNumber).padStart(2, "0");
+  } else {
+    el.minute.value = String(firstMinute).padStart(2, "0");
+  }
+}
+
+function setTimeValue(time) {
+  if (!time) {
+    el.hour.value = "";
+    populateMinuteOptions("");
+    el.time.value = "";
+    return;
+  }
+  var parts = time.split(":");
+  el.hour.value = parts[0];
+  populateMinuteOptions(parts[1]);
+  syncTimeFromPicker();
+}
+
+function syncTimeFromPicker() {
+  el.time.value = el.hour.value && el.minute.value
+    ? el.hour.value + ":" + el.minute.value
+    : "";
+  updateAvailability();
+}
+
+function updateAvailability() {
+  if (!restaurant) return;
+  var message = getDateValidationMessage() || getTimeValidationMessage();
+  el.timeStatus.textContent = message || "可预订 · 24小时制";
+  el.timeStatus.classList.toggle("available", !message);
+  updateSummary();
+}
+
+function getDateValidationMessage() {
+  if (!el.date.value) return "请选择预约日期";
+  if (el.date.value < toDateInput(new Date())) return "不能预约过去的日期";
+  return "";
+}
+
+function getNameValidationMessage() {
+  var name = el.name.value.trim();
+  if (!name) return "请填写客人姓名";
+  if (name.length > 80) return "姓名不能超过 80 个字符";
+  return "";
+}
+
+function getTimeValidationMessage() {
+  if (!restaurant) return "餐馆信息正在加载";
+  if (!el.time.value) return "请选择预约时间";
+  if (!isTimeWithinRange(el.time.value)) {
+    return "时间必须在 " + restaurant.openingTime + " 到 " + restaurant.closingTime + " 之间";
+  }
+  if (isSelectedTimeInPast()) return "这个时间已经过去，请换一个时间或日期";
+  return "";
+}
+
+async function handleBookingSubmit(event) {
+  event.preventDefault();
+  var validationMessage = getDateValidationMessage() || getNameValidationMessage() || getTimeValidationMessage();
+  if (validationMessage) return showToast(validationMessage);
+
+  var confirmedCode = "";
+  submitting = true;
+  el.submit.textContent = "Booking...";
+  updateSummary();
+  try {
+    var response = await fetch(API_BASE + "/api/restaurants/" + restaurant.slug + "/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        date: el.date.value,
+        name: el.name.value.trim(),
+        partySize: Number(el.partySize.value),
+        time: el.time.value
+      })
+    });
+    var result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "预订失败，请稍后再试");
+    confirmedCode = result.booking.code;
+    saveBookingReceipt(result.booking, "confirmed");
+    showBookingReceipt(result.booking, "confirmed");
+    showToast("预订成功，请复制并保存预订编号");
+  } catch (error) {
+    showToast(error instanceof TypeError ? "无法连接预订服务" : error.message);
+  } finally {
+    submitting = false;
+    el.submit.textContent = "Make Booking";
+    updateSummary();
+    if (confirmedCode) el.summary.textContent = "预订成功，请复制并保存下方的预订编号";
+  }
+}
+
+function receiptStorageKey() {
+  return "tenseatBooking:" + restaurantSlug;
+}
+
+function saveBookingReceipt(booking, status) {
+  sessionStorage.setItem(receiptStorageKey(), JSON.stringify({
+    code: booking.code,
+    date: booking.date,
+    name: booking.name,
+    time: booking.time,
+    partySize: booking.partySize,
+    status: status
+  }));
+}
+
+function getSavedBooking() {
+  try {
+    return JSON.parse(sessionStorage.getItem(receiptStorageKey()) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function loadSavedBooking() {
+  var booking = getSavedBooking();
+  if (booking && booking.code) showBookingReceipt(booking, booking.status || "confirmed");
+}
+
+function showBookingReceipt(booking, status) {
+  el.receipt.hidden = false;
+  el.receipt.classList.toggle("cancelled", status === "cancelled");
+  el.receiptTitle.textContent = status === "cancelled" ? "预订已取消" : "预订成功";
+  el.receiptCode.textContent = booking.code;
+  el.receiptReminder.hidden = status === "cancelled";
+  el.copyCode.textContent = "复制编号";
+  el.receiptDetails.textContent = [
+    booking.name,
+    booking.date,
+    booking.time,
+    booking.partySize + " 人"
+  ].filter(Boolean).join(" · ");
+  el.receiptState.textContent = status === "cancelled" ? "已取消" : "已确认";
+}
+
+function markSavedBookingCancelled(code) {
+  var booking = getSavedBooking();
+  if (booking && booking.code === code) {
+    booking.status = "cancelled";
+    sessionStorage.setItem(receiptStorageKey(), JSON.stringify(booking));
+    showBookingReceipt(booking, "cancelled");
+  }
+}
+
+async function copyBookingCode() {
+  var code = el.receiptCode.textContent.trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    el.copyCode.textContent = "已复制";
+    showToast("预订编号已复制");
+  } catch {
+    showToast("无法复制，请手动记录编号");
+  }
+}
+
+async function handleCancelSubmit(event) {
+  event.preventDefault();
+  if (cancelling) return;
+  cancelling = true;
+  el.cancelSubmit.textContent = "Cancelling...";
+  updateCancelState();
+  el.cancelStatus.textContent = "";
+  el.cancelStatus.classList.remove("cancel-status-success");
+  try {
+    var response = await fetch(API_BASE + "/api/restaurants/" + restaurant.slug + "/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: el.cancelCode.value.trim().toUpperCase() })
+    });
+    var result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "无法取消预订");
+    el.cancelStatus.textContent = "取消成功 · " + result.booking.code;
+    el.cancelStatus.classList.add("cancel-status-success");
+    markSavedBookingCancelled(result.booking.code);
+    showToast("取消成功 · " + result.booking.code);
+  } catch (error) {
+    var message = error instanceof TypeError ? "无法连接预订服务" : error.message;
+    el.cancelStatus.textContent = message;
+    showToast(message);
+  } finally {
+    cancelling = false;
+    el.cancelSubmit.textContent = "取消预订";
+    updateCancelState();
+  }
+}
+
+function updateCancelState() {
+  el.cancelSubmit.disabled = cancelling || !el.cancelCode.value.trim() || !restaurant;
+}
+
+function updateSummary() {
+  if (!restaurant) return;
+  var validationMessage = getDateValidationMessage() || getNameValidationMessage() || getTimeValidationMessage();
+  if (!el.date.value || !el.time.value) {
+    el.summary.textContent = "请选择日期、姓名、人数和时间";
+    el.submit.disabled = true;
+    return;
+  }
+  el.summary.textContent = formatBookingDate(el.date.value) + " " + el.time.value +
+    " · " + el.partySize.value + " 人";
+  el.submit.disabled = submitting || Boolean(validationMessage) || !el.form.checkValidity();
+}
+
+function isTimeWithinRange(time) {
+  return toMinutes(time) >= toMinutes(restaurant.openingTime) &&
+    toMinutes(time) <= toMinutes(restaurant.closingTime);
+}
+
+function isSelectedTimeInPast() {
+  if (el.date.value !== toDateInput(new Date())) return false;
+  return new Date(el.date.value + "T" + el.time.value + ":00") < new Date();
+}
+
+function getSuggestedTime() {
+  var today = toDateInput(new Date());
+  if (el.date.value && el.date.value !== today) return restaurant.openingTime;
+  var now = new Date();
+  var nowMinutes = now.getHours() * 60 + now.getMinutes();
+  var start = toMinutes(restaurant.openingTime);
+  var end = toMinutes(restaurant.closingTime);
+  if (nowMinutes < start) return restaurant.openingTime;
+  if (nowMinutes >= end) return "";
+  return fromMinutes(nowMinutes + 1);
+}
+
+function updateOpenStatus() {
+  var now = new Date();
+  var nowMinutes = now.getHours() * 60 + now.getMinutes();
+  var open = nowMinutes >= toMinutes(restaurant.openingTime) && nowMinutes < toMinutes(restaurant.closingTime);
+  el.openStatus.textContent = open ? "Open" : "Closed";
+  el.openStatus.style.color = open ? "var(--green)" : "var(--coral)";
+}
+
+function formatBookingDate(value) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "long",
+    day: "numeric",
+    weekday: "short"
+  }).format(new Date(value + "T12:00:00"));
+}
+
+function toMinutes(time) {
+  var parts = time.split(":").map(Number);
+  return parts[0] * 60 + parts[1];
+}
+
+function fromMinutes(totalMinutes) {
+  var hours = Math.floor(totalMinutes / 60) % 24;
+  var minutes = totalMinutes % 60;
+  return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0");
+}
+
+function toDateInput(date) {
+  var offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(0, 10);
+}
+
+function showToast(message) {
+  el.toast.textContent = message;
+  el.toast.classList.add("show");
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(function () { el.toast.classList.remove("show"); }, 2800);
+}
