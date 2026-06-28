@@ -25,7 +25,9 @@ const RATE_LIMIT_RULES = {
   cancel: { windowMs: 10 * 60 * 1000, max: 25 }
 };
 const PUBLIC_FILES = new Map([
-  ["/", ["index.html", "text/html; charset=utf-8"]],
+  ["/", ["home.html", "text/html; charset=utf-8"]],
+  ["/home.html", ["home.html", "text/html; charset=utf-8"]],
+  ["/home.css", ["home.css", "text/css; charset=utf-8"]],
   ["/index.html", ["index.html", "text/html; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
@@ -873,7 +875,7 @@ async function servePublicFile(request, response, pathname) {
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https://*.google.com https://*.gstatic.com https://*.googleusercontent.com",
+      "img-src 'self' data: https://*.google.com https://*.gstatic.com https://*.googleusercontent.com https://images.unsplash.com",
       "frame-src https://www.google.com",
       "connect-src 'self' http://127.0.0.1:8795 http://localhost:8795",
       "base-uri 'none'",

@@ -10,6 +10,7 @@ npm start
 ```
 
 - Chirin guest booking page: `http://127.0.0.1:8795/r/chirin`
+- TenSeat official homepage: `http://127.0.0.1:8795/`
 - Restaurant login and registration: `http://127.0.0.1:8795/owner`
 
 ## Chirin Starter Account
@@ -22,6 +23,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 ## Current Features
 
 - Each restaurant can register, log in, and get its own booking link.
+- The root homepage introduces TenSeat and links restaurants to the dashboard login.
 - Guests choose date, last name, first name, required phone number, party size, notes, and a 24-hour time inside the restaurant service periods.
 - Restaurants can set one or two service periods, such as lunch `11:30-14:30` and dinner `17:00-21:00`.
 - Each restaurant booking page updates the Google Maps embed from the dashboard address or Google Maps search text.

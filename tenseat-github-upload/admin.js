@@ -85,6 +85,7 @@ function init() {
   el.copyLink.addEventListener("click", copyBookingLink);
   el.settingsForm.addEventListener("submit", saveSettings);
   el.passwordForm.addEventListener("submit", changePassword);
+  if (new URLSearchParams(window.location.search).get("mode") === "register") showAuthMode("register");
   if (token) restoreSession();
 }
 
