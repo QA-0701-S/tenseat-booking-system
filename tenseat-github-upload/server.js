@@ -568,11 +568,13 @@ function getEmailTransporter() {
   if (!config) return null;
   const host = String(process.env.GMAIL_SMTP_HOST || "smtp.gmail.com").trim() || "smtp.gmail.com";
   const port = numberFromEnv("GMAIL_SMTP_PORT", 587);
-  const key = [config.user, config.appPassword, host, port].join(":");
+  const family = 4;
+  const key = [config.user, config.appPassword, host, port, family].join(":");
   if (!emailTransporter || emailTransporterKey !== key) {
     emailTransporter = nodemailer.createTransport({
       host: host,
       port: port,
+      family: family,
       secure: port === 465,
       requireTLS: port !== 465,
       auth: {
