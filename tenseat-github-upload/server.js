@@ -567,7 +567,7 @@ function getEmailTransporter() {
   const config = emailConfig();
   if (!config) return null;
   const host = String(process.env.GMAIL_SMTP_HOST || "smtp.gmail.com").trim() || "smtp.gmail.com";
-  const port = numberFromEnv("GMAIL_SMTP_PORT", 587);
+  const port = numberFromEnv("GMAIL_SMTP_PORT", 465);
   const family = 4;
   const key = [config.user, config.appPassword, host, port, family].join(":");
   if (!emailTransporter || emailTransporterKey !== key) {
