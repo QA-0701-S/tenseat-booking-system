@@ -72,7 +72,7 @@ GMAIL_APP_PASSWORD=your-16-character-google-app-password
 EMAIL_FROM_NAME=TenSeat
 ```
 
-Gmail sending requires a Google App Password. A normal Gmail login password should not be used.
+Gmail sending requires a Google App Password. A normal Gmail login password should not be used. Spaces in the App Password are removed automatically.
 
 ## Render Steps
 

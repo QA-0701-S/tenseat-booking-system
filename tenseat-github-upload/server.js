@@ -542,7 +542,7 @@ function publicBookingResponse(booking) {
 
 function emailConfig() {
   const user = String(process.env.GMAIL_USER || "").trim();
-  const appPassword = String(process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || "").trim();
+  const appPassword = String(process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || "").replace(/\s+/g, "");
   if (!user || !appPassword) return null;
   return {
     user: user,
