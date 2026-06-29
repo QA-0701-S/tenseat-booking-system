@@ -18,6 +18,9 @@ const PUBLIC_ORIGIN = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "")
 const TRUST_PROXY = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || ""));
 const MAX_BODY_BYTES = 64 * 1024;
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const EMAIL_CONNECT_TIMEOUT_MS = numberFromEnv("EMAIL_CONNECT_TIMEOUT_MS", 10000);
+const EMAIL_SOCKET_TIMEOUT_MS = numberFromEnv("EMAIL_SOCKET_TIMEOUT_MS", 15000);
+const EMAIL_SEND_TIMEOUT_MS = numberFromEnv("EMAIL_SEND_TIMEOUT_MS", 20000);
 const RATE_LIMITS = new Map();
 const RATE_LIMIT_RULES = {
   api: { windowMs: 60 * 1000, max: 160 },
@@ -42,6 +45,11 @@ let dataWriteQueue = Promise.resolve();
 let sessionSecret = "";
 let emailTransporter = null;
 let emailTransporterKey = "";
+
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function sendJson(response, statusCode, payload, extraHeaders) {
   const body = JSON.stringify(payload);
@@ -558,18 +566,36 @@ function emailStatusSkipped(reason) {
 function getEmailTransporter() {
   const config = emailConfig();
   if (!config) return null;
-  const key = config.user + ":" + config.appPassword;
+  const host = String(process.env.GMAIL_SMTP_HOST || "smtp.gmail.com").trim() || "smtp.gmail.com";
+  const port = numberFromEnv("GMAIL_SMTP_PORT", 587);
+  const key = [config.user, config.appPassword, host, port].join(":");
   if (!emailTransporter || emailTransporterKey !== key) {
     emailTransporter = nodemailer.createTransport({
-      service: "gmail",
+      host: host,
+      port: port,
+      secure: port === 465,
+      requireTLS: port !== 465,
       auth: {
         user: config.user,
         pass: config.appPassword
-      }
+      },
+      connectionTimeout: EMAIL_CONNECT_TIMEOUT_MS,
+      greetingTimeout: EMAIL_CONNECT_TIMEOUT_MS,
+      socketTimeout: EMAIL_SOCKET_TIMEOUT_MS
     });
     emailTransporterKey = key;
   }
   return emailTransporter;
+}
+
+function timeoutAfter(ms, message) {
+  return new Promise(function (_, reject) {
+    setTimeout(function () {
+      const error = new Error(message);
+      error.code = "EMAIL_TIMEOUT";
+      reject(error);
+    }, ms);
+  });
 }
 
 function publicBaseUrl(request) {
@@ -653,13 +679,13 @@ async function sendBookingConfirmationEmail(options) {
     mapsUrl: googleMapsSearchUrl(options.restaurant),
     cancelUrl: bookingCancelUrl(options.restaurant, options.booking, options.baseUrl)
   };
-  await transporter.sendMail({
+  await Promise.race([transporter.sendMail({
     from: "\"" + config.fromName.replace(/"/g, "") + "\" <" + config.user + ">",
     to: recipient,
     subject: bookingEmailSubject(options.restaurant, options.booking),
     text: bookingConfirmationText(options.restaurant, options.booking, links),
     html: bookingConfirmationHtml(options.restaurant, options.booking, links)
-  });
+  }), timeoutAfter(EMAIL_SEND_TIMEOUT_MS, "Gmail did not respond within " + Math.round(EMAIL_SEND_TIMEOUT_MS / 1000) + " seconds.")]);
   return { sent: true, to: recipient };
 }
 
