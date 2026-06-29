@@ -4,6 +4,7 @@ const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
 const APP_DIR = __dirname;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(APP_DIR, "data");
@@ -39,6 +40,8 @@ const PUBLIC_FILES = new Map([
 
 let dataWriteQueue = Promise.resolve();
 let sessionSecret = "";
+let emailTransporter = null;
+let emailTransporterKey = "";
 
 function sendJson(response, statusCode, payload, extraHeaders) {
   const body = JSON.stringify(payload);
@@ -206,6 +209,10 @@ function normalizeGuestText(value) {
 
 function normalizePhone(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeGuestEmail(value) {
+  return String(value || "").trim().toLowerCase().slice(0, 160);
 }
 
 function personFromInput(input) {
@@ -451,6 +458,7 @@ function validateBooking(input, restaurant) {
   const date = String(input.date || "");
   const person = personFromInput(input);
   const phone = normalizePhone(input.phone);
+  const guestEmail = normalizeGuestEmail(input.email || input.guestEmail);
   const partySize = Number(input.partySize);
   const time = String(input.time || "");
   const today = localDateString(new Date());
@@ -459,6 +467,7 @@ function validateBooking(input, restaurant) {
   if (!person.lastName || person.lastName.length > 80) return "Enter a valid guest last name.";
   if (!person.firstName || person.firstName.length > 80) return "Enter a valid guest first name.";
   if (!phone || !/^[0-9+\-()\s]{6,24}$/.test(phone)) return "Enter a valid phone number.";
+  if (guestEmail && !isValidEmail(guestEmail)) return "Enter a valid email address.";
   if (!Number.isInteger(partySize) || partySize < 1 || partySize > restaurant.maxPartySize) {
     return "Party size must be between 1 and " + restaurant.maxPartySize + ".";
   }
@@ -506,6 +515,7 @@ function bookingResponse(booking, options) {
     lastName: booking.lastName || "",
     name: bookingDisplayName(booking),
     phone: includePrivate ? (booking.phone || "") : undefined,
+    email: includePrivate ? (booking.email || "") : undefined,
     time: booking.time,
     partySize: booking.partySize,
     notes: booking.notes || "",
@@ -528,6 +538,129 @@ function publicBookingResponse(booking) {
     notes: booking.notes || "",
     status: booking.status
   };
+}
+
+function emailConfig() {
+  const user = String(process.env.GMAIL_USER || "").trim();
+  const appPassword = String(process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || "").trim();
+  if (!user || !appPassword) return null;
+  return {
+    user: user,
+    appPassword: appPassword,
+    fromName: String(process.env.EMAIL_FROM_NAME || "TenSeat").trim() || "TenSeat"
+  };
+}
+
+function emailStatusSkipped(reason) {
+  return { sent: false, skipped: true, reason: reason };
+}
+
+function getEmailTransporter() {
+  const config = emailConfig();
+  if (!config) return null;
+  const key = config.user + ":" + config.appPassword;
+  if (!emailTransporter || emailTransporterKey !== key) {
+    emailTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: config.user,
+        pass: config.appPassword
+      }
+    });
+    emailTransporterKey = key;
+  }
+  return emailTransporter;
+}
+
+function publicBaseUrl(request) {
+  if (PUBLIC_ORIGIN) return PUBLIC_ORIGIN;
+  const host = String(request.headers.host || "127.0.0.1:" + PORT);
+  const proto = TRUST_PROXY ? String(request.headers["x-forwarded-proto"] || "https").split(",")[0].trim() : "http";
+  return proto + "://" + host;
+}
+
+function googleMapsSearchUrl(restaurant) {
+  const query = encodeURIComponent(restaurant.googleMapsQuery || restaurant.address || restaurant.name);
+  return "https://www.google.com/maps/search/?api=1&query=" + query;
+}
+
+function bookingCancelUrl(restaurant, booking, baseUrl) {
+  return baseUrl.replace(/\/$/, "") + "/r/" + restaurant.slug + "?cancel=" + encodeURIComponent(booking.code);
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function bookingEmailSubject(restaurant, booking) {
+  return "Booking confirmed - " + restaurant.name + " - " + booking.date + " " + booking.time;
+}
+
+function bookingConfirmationText(restaurant, booking, links) {
+  return [
+    "Your booking is confirmed.",
+    "",
+    "Restaurant: " + restaurant.name,
+    "Date: " + booking.date,
+    "Time: " + booking.time,
+    "Party size: " + booking.partySize,
+    "Address: " + (restaurant.address || ""),
+    "Google Maps: " + links.mapsUrl,
+    "Booking code: " + booking.code,
+    "Cancel booking: " + links.cancelUrl,
+    "",
+    "Please save your booking code in case you need to cancel."
+  ].join("\n");
+}
+
+function bookingConfirmationHtml(restaurant, booking, links) {
+  const rows = [
+    ["Restaurant", restaurant.name],
+    ["Date", booking.date],
+    ["Time", booking.time],
+    ["Party size", booking.partySize],
+    ["Address", restaurant.address || ""],
+    ["Booking code", booking.code]
+  ].map(function (row) {
+    return "<tr><th>" + escapeHtml(row[0]) + "</th><td>" + escapeHtml(row[1]) + "</td></tr>";
+  }).join("");
+
+  return "<!doctype html><html><body style=\"margin:0;background:#f5f3ec;color:#18211f;font-family:Arial,sans-serif;\">" +
+    "<div style=\"max-width:620px;margin:0 auto;padding:28px 18px;\">" +
+    "<div style=\"background:#ffffff;border:1px solid #ddd9cd;border-radius:8px;overflow:hidden;\">" +
+    "<div style=\"padding:24px;background:#0a3f35;color:#ffffff;\"><p style=\"margin:0 0 8px;color:#c9952f;font-weight:800;letter-spacing:.08em;text-transform:uppercase;\">Booking confirmed</p>" +
+    "<h1 style=\"margin:0;font-family:Georgia,serif;font-size:32px;\">" + escapeHtml(restaurant.name) + "</h1></div>" +
+    "<div style=\"padding:24px;\"><p style=\"margin:0 0 18px;font-size:16px;line-height:1.5;\">Your booking is confirmed. Please save your booking code.</p>" +
+    "<table style=\"width:100%;border-collapse:collapse;margin:0 0 20px;\">" + rows + "</table>" +
+    "<p style=\"margin:0 0 12px;\"><a href=\"" + escapeHtml(links.mapsUrl) + "\" style=\"color:#11644f;font-weight:800;\">Open Google Maps</a></p>" +
+    "<p style=\"margin:0;\"><a href=\"" + escapeHtml(links.cancelUrl) + "\" style=\"color:#c65f3d;font-weight:800;\">Cancel booking</a></p>" +
+    "</div></div></div></body></html>";
+}
+
+async function sendBookingConfirmationEmail(options) {
+  const recipient = normalizeGuestEmail(options.to);
+  if (!recipient) return emailStatusSkipped("missing_recipient");
+  if (!isValidEmail(recipient)) return emailStatusSkipped("invalid_recipient");
+  const config = emailConfig();
+  if (!config) return emailStatusSkipped("gmail_not_configured");
+  const transporter = getEmailTransporter();
+  const links = {
+    mapsUrl: googleMapsSearchUrl(options.restaurant),
+    cancelUrl: bookingCancelUrl(options.restaurant, options.booking, options.baseUrl)
+  };
+  await transporter.sendMail({
+    from: "\"" + config.fromName.replace(/"/g, "") + "\" <" + config.user + ">",
+    to: recipient,
+    subject: bookingEmailSubject(options.restaurant, options.booking),
+    text: bookingConfirmationText(options.restaurant, options.booking, links),
+    html: bookingConfirmationHtml(options.restaurant, options.booking, links)
+  });
+  return { sent: true, to: recipient };
 }
 
 async function findRestaurantBySlug(slug) {
@@ -681,6 +814,35 @@ async function handleChangePassword(request, response) {
   sendJson(response, 200, { ok: true, restaurant: ownerRestaurant(updated) });
 }
 
+async function handleOwnerTestEmail(request, response) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const to = normalizeGuestEmail(input.to || input.email);
+  if (!to || !isValidEmail(to)) return sendJson(response, 400, { ok: false, error: "Enter a valid test email address." });
+  const now = new Date();
+  const sampleBooking = {
+    code: "TS-TEST1",
+    date: localDateString(new Date(now.getTime() + 24 * 60 * 60 * 1000)),
+    time: servicePeriodsFor(restaurant)[0].openingTime,
+    partySize: 2
+  };
+  try {
+    const email = await sendBookingConfirmationEmail({
+      to: to,
+      restaurant: restaurant,
+      booking: sampleBooking,
+      baseUrl: publicBaseUrl(request)
+    });
+    if (!email.sent) return sendJson(response, 503, { ok: false, error: "Gmail email is not configured.", email: email });
+    sendJson(response, 200, { ok: true, email: email });
+  } catch (error) {
+    console.error("Test email failed:", error.message);
+    sendJson(response, 502, { ok: false, error: "Test email could not be sent. Check the Gmail App Password.", details: error.message });
+  }
+}
+
 async function handleCreateBooking(request, response, restaurant) {
   const input = await parseBody(request, response);
   if (!input) return;
@@ -688,6 +850,7 @@ async function handleCreateBooking(request, response, restaurant) {
   if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
   const person = personFromInput(input);
   const phone = normalizePhone(input.phone);
+  const guestEmail = normalizeGuestEmail(input.email || input.guestEmail);
   let booking;
   let fullError = "";
   dataWriteQueue = dataWriteQueue.then(async function () {
@@ -704,6 +867,7 @@ async function handleCreateBooking(request, response, restaurant) {
       lastName: person.lastName,
       name: person.displayName,
       phone: phone,
+      email: guestEmail,
       time: String(input.time),
       partySize: Number(input.partySize),
       notes: normalizeNotes(input.notes),
@@ -716,7 +880,19 @@ async function handleCreateBooking(request, response, restaurant) {
   });
   await dataWriteQueue;
   if (fullError) return sendJson(response, 409, { ok: false, error: fullError });
-  sendJson(response, 201, { ok: true, booking: publicBookingResponse(booking) });
+  let emailStatus = emailStatusSkipped(guestEmail ? "gmail_not_configured" : "missing_recipient");
+  try {
+    emailStatus = await sendBookingConfirmationEmail({
+      to: guestEmail,
+      restaurant: restaurant,
+      booking: booking,
+      baseUrl: publicBaseUrl(request)
+    });
+  } catch (error) {
+    console.error("Booking email failed:", error.message);
+    emailStatus = { sent: false, skipped: false, reason: "send_failed" };
+  }
+  sendJson(response, 201, { ok: true, booking: publicBookingResponse(booking), email: emailStatus });
 }
 
 async function handleCancelBooking(request, response, restaurant) {
@@ -759,6 +935,7 @@ async function handleOwnerCreateBooking(request, response) {
   if (validationError) return sendJson(response, 400, { ok: false, error: validationError });
   const person = personFromInput(input);
   const phone = normalizePhone(input.phone);
+  const guestEmail = normalizeGuestEmail(input.email || input.guestEmail);
 
   let booking;
   let fullError = "";
@@ -776,6 +953,7 @@ async function handleOwnerCreateBooking(request, response) {
       lastName: person.lastName,
       name: person.displayName,
       phone: phone,
+      email: guestEmail,
       time: String(input.time),
       partySize: Number(input.partySize),
       notes: normalizeNotes(input.notes),
@@ -921,6 +1099,7 @@ async function route(request, response) {
   if (request.method === "GET" && pathname === "/api/owner/me") return handleOwnerMe(request, response);
   if (request.method === "PATCH" && pathname === "/api/owner/me") return handleUpdateRestaurant(request, response);
   if (request.method === "POST" && pathname === "/api/owner/change-password") return handleChangePassword(request, response);
+  if (request.method === "POST" && pathname === "/api/owner/test-email") return handleOwnerTestEmail(request, response);
   if (request.method === "GET" && pathname === "/api/owner/bookings") return handleOwnerBookings(request, response, requestUrl);
   if (request.method === "POST" && pathname === "/api/owner/bookings") return handleOwnerCreateBooking(request, response);
   if (request.method === "PATCH" && ownerBookingMatch) return handleOwnerUpdateBooking(request, response, ownerBookingMatch[1]);

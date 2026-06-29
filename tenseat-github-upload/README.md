@@ -30,8 +30,9 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Maximum party size is configurable. Restaurant A defaults to 20 guests.
 - Capacity at the same exact time is configurable, and the system blocks overbooking.
 - Guests receive an on-screen booking code and are prompted to copy it.
+- If Gmail SMTP is configured and the guest enters an email address, TenSeat sends a booking confirmation email.
 - Guests can cancel by booking code.
-- The restaurant dashboard shows bookings, guest count, phone number, notes, cancelled bookings, no-shows, and booking codes.
+- The restaurant dashboard shows bookings, guest count, phone number, email, notes, cancelled bookings, no-shows, and booking codes.
 - Restaurant staff can add manual phone or walk-in bookings.
 - Restaurant staff can cancel bookings, mark no-shows, and restore bookings.
 - Booking codes use a short format such as `TS-8K42PA`.
@@ -66,7 +67,12 @@ PUBLIC_ORIGIN=https://your-tenseat-domain.example
 SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 TRUST_PROXY=true
 DATA_DIR=/var/data/tenseat
+GMAIL_USER=your-gmail-address@gmail.com
+GMAIL_APP_PASSWORD=your-16-character-google-app-password
+EMAIL_FROM_NAME=TenSeat
 ```
+
+Gmail sending requires a Google App Password. A normal Gmail login password should not be used.
 
 ## Render Steps
 

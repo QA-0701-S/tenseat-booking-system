@@ -18,8 +18,8 @@ const fixtures = [
       { openingTime: "17:00", closingTime: "21:00" }
     ],
     bookings: [
-      { firstName: "Ava", lastName: "Brown", phone: "0400 111 222", time: "12:10", partySize: 2, notes: "Window seat" },
-      { firstName: "Noah", lastName: "Wilson", phone: "0400 333 444", time: "18:45", partySize: 4, notes: "Birthday" }
+      { firstName: "Ava", lastName: "Brown", phone: "0400 111 222", email: "ava@example.com", time: "12:10", partySize: 2, notes: "Window seat" },
+      { firstName: "Noah", lastName: "Wilson", phone: "0400 333 444", email: "noah@example.com", time: "18:45", partySize: 4, notes: "Birthday" }
     ]
   },
   {
@@ -36,9 +36,9 @@ const fixtures = [
       { openingTime: "17:00", closingTime: "21:00" }
     ],
     bookings: [
-      { firstName: "Mia", lastName: "Brown", phone: "0400 555 666", time: "12:30", partySize: 3, notes: "High chair" },
-      { firstName: "Jack", lastName: "Wilson", phone: "0400 777 888", time: "18:45", partySize: 5, notes: "Peanut allergy" },
-      { firstName: "Olivia", lastName: "Taylor", phone: "0400 999 000", time: "20:00", partySize: 2, notes: "Cancelled test", cancel: true }
+      { firstName: "Mia", lastName: "Brown", phone: "0400 555 666", email: "mia@example.com", time: "12:30", partySize: 3, notes: "High chair" },
+      { firstName: "Jack", lastName: "Wilson", phone: "0400 777 888", email: "jack@example.com", time: "18:45", partySize: 5, notes: "Peanut allergy" },
+      { firstName: "Olivia", lastName: "Taylor", phone: "0400 999 000", email: "olivia@example.com", time: "20:00", partySize: 2, notes: "Cancelled test", cancel: true }
     ]
   }
 ];
@@ -118,6 +118,7 @@ async function seedBookings(fixture, token) {
         firstName: booking.firstName,
         lastName: booking.lastName,
         phone: booking.phone,
+        email: booking.email,
         partySize: booking.partySize,
         time: booking.time,
         notes: booking.notes || ""

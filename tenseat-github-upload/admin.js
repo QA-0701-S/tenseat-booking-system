@@ -241,6 +241,7 @@ function renderBookings(result) {
     row.appendChild(createCell(bookingLastName(booking), "guest-name", "Last name"));
     row.appendChild(createCell(bookingFirstName(booking), "guest-name", "First name"));
     row.appendChild(createCell(booking.phone || "-", "booking-phone", "Phone"));
+    row.appendChild(createCell(booking.email || "-", "booking-email", "Email"));
     row.appendChild(createCell(booking.time, "time-value", "Time"));
     var partyCell = document.createElement("td");
     partyCell.dataset.label = "Party";

@@ -6,5 +6,8 @@
     "start": "node server.js",
     "check": "node --check server.js && node --check app.js && node --check admin.js && node --check scripts/seed-test-data.js",
     "seed:test": "node scripts/seed-test-data.js"
+  },
+  "dependencies": {
+    "nodemailer": "^9.0.1"
   }
 }

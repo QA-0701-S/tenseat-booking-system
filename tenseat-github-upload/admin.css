@@ -383,7 +383,7 @@ input:focus-visible {
 
 table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1280px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -445,6 +445,13 @@ tbody tr:hover {
 .booking-phone {
   color: var(--ink);
   font-weight: 750;
+}
+
+.booking-email {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
 }
 
 .empty-state {

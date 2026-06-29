@@ -19,6 +19,7 @@ var el = {
   firstName: document.getElementById("bookingFirstName"),
   lastName: document.getElementById("bookingLastName"),
   phone: document.getElementById("bookingPhone"),
+  email: document.getElementById("bookingEmail"),
   notes: document.getElementById("bookingNotes"),
   hour: document.getElementById("bookingHour"),
   minute: document.getElementById("bookingMinute"),
@@ -62,6 +63,7 @@ async function init() {
     updateOpenStatus();
     updateAvailability();
     loadSavedBooking();
+    applyCancelCodeFromUrl();
     updateCancelState();
   } catch (error) {
     el.summary.textContent = error.message;
@@ -93,6 +95,7 @@ function wireEvents() {
   el.firstName.addEventListener("input", updateSummary);
   el.lastName.addEventListener("input", updateSummary);
   el.phone.addEventListener("input", updateSummary);
+  el.email.addEventListener("input", updateSummary);
   el.notes.addEventListener("input", updateSummary);
   el.hour.addEventListener("change", handleHourChange);
   el.minute.addEventListener("change", syncTimeFromPicker);
@@ -195,11 +198,13 @@ function getGuestValidationMessage() {
   var firstName = el.firstName.value.trim();
   var lastName = el.lastName.value.trim();
   var phone = el.phone.value.trim();
+  var email = el.email.value.trim();
   if (!lastName) return "Enter the guest last name.";
   if (!firstName) return "Enter the guest first name.";
   if (lastName.length > 80 || firstName.length > 80) return "Names must be 80 characters or fewer.";
   if (!phone) return "Enter a phone number.";
   if (!/^[0-9+\-()\s]{6,24}$/.test(phone)) return "Enter a valid phone number.";
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Enter a valid email address.";
   return "";
 }
 
@@ -231,6 +236,7 @@ async function handleBookingSubmit(event) {
         firstName: el.firstName.value.trim(),
         lastName: el.lastName.value.trim(),
         phone: el.phone.value.trim(),
+        email: el.email.value.trim(),
         notes: el.notes.value.trim(),
         partySize: Number(el.partySize.value),
         time: el.time.value
@@ -241,7 +247,9 @@ async function handleBookingSubmit(event) {
     confirmedCode = result.booking.code;
     saveBookingReceipt(result.booking, "confirmed");
     showBookingReceipt(result.booking, "confirmed");
-    showToast("Booking confirmed. Copy and save your booking code.");
+    showToast(result.email && result.email.sent
+      ? "Booking confirmed. Confirmation email sent."
+      : "Booking confirmed. Copy and save your booking code.");
   } catch (error) {
     showToast(error instanceof TypeError ? "Could not connect to the booking service." : error.message);
   } finally {
@@ -263,6 +271,7 @@ function saveBookingReceipt(booking, status) {
     firstName: booking.firstName || el.firstName.value.trim(),
     lastName: booking.lastName || el.lastName.value.trim(),
     name: booking.name || displayName({ firstName: el.firstName.value.trim(), lastName: el.lastName.value.trim() }),
+    email: booking.email || el.email.value.trim(),
     notes: booking.notes || "",
     time: booking.time,
     partySize: booking.partySize,
@@ -283,6 +292,14 @@ function loadSavedBooking() {
   if (booking && booking.code) showBookingReceipt(booking, booking.status || "confirmed");
 }
 
+function applyCancelCodeFromUrl() {
+  var code = new URLSearchParams(window.location.search).get("cancel");
+  if (!code) return;
+  el.cancelCode.value = code.trim().toUpperCase();
+  var cancelSection = document.querySelector(".cancel-booking");
+  if (cancelSection) cancelSection.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function showBookingReceipt(booking, status) {
   el.receipt.hidden = false;
   el.receipt.classList.toggle("cancelled", status === "cancelled");
@@ -295,6 +312,7 @@ function showBookingReceipt(booking, status) {
     booking.date,
     booking.time,
     booking.partySize + (Number(booking.partySize) === 1 ? " guest" : " guests"),
+    booking.email ? "Email: " + booking.email : "",
     booking.notes ? "Notes: " + booking.notes : ""
   ].filter(Boolean).join(" - ");
   el.receiptState.textContent = status === "cancelled" ? "Cancelled" : "Confirmed";
