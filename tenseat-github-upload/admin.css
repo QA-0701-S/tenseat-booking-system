@@ -799,11 +799,77 @@ tbody tr:hover {
   font-size: 22px;
 }
 
+.plan-band small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .plan-status {
   padding: 7px 10px;
   border-radius: 999px;
   color: var(--green) !important;
   background: var(--green-soft);
+}
+
+.billing-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-top: 0;
+}
+
+.billing-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 206px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.billing-card.featured {
+  border-color: #d5ae58;
+  background: #fffaf0;
+}
+
+.billing-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.billing-card strong {
+  color: var(--ink);
+  font-size: 24px;
+}
+
+.billing-card p,
+.billing-actions p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.billing-card button {
+  width: fit-content;
+  margin-top: auto;
+}
+
+.billing-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 4px;
 }
 
 .settings-section {
@@ -958,6 +1024,7 @@ tbody tr:hover {
 
   .settings-form,
   .password-form,
+  .billing-panel,
   .owner-booking-form {
     grid-template-columns: 1fr;
   }
@@ -973,8 +1040,14 @@ tbody tr:hover {
 
   .password-submit,
   .settings-submit,
+  .billing-card button,
   .owner-booking-submit {
     width: 100%;
+  }
+
+  .billing-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

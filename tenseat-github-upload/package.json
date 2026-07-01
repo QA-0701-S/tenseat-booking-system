@@ -8,6 +8,7 @@
     "seed:test": "node scripts/seed-test-data.js"
   },
   "dependencies": {
-    "nodemailer": "^9.0.1"
+    "nodemailer": "^9.0.1",
+    "stripe": "^22.3.0"
   }
 }

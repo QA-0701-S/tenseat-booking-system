@@ -5,6 +5,7 @@ const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
+const Stripe = require("stripe");
 
 const APP_DIR = __dirname;
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(APP_DIR, "data");
@@ -40,11 +41,33 @@ const PUBLIC_FILES = new Map([
   ["/admin.css", ["admin.css", "text/css; charset=utf-8"]],
   ["/admin.js", ["admin.js", "text/javascript; charset=utf-8"]]
 ]);
+const BILLING_PLANS = {
+  basic: {
+    key: "basic",
+    name: "TenSeat Basic",
+    description: "Core booking system for one restaurant.",
+    priceMonthly: 10,
+    unitAmount: 1000,
+    currency: "AUD",
+    priceEnv: "STRIPE_BASIC_PRICE_ID"
+  },
+  pro: {
+    key: "pro",
+    name: "TenSeat Pro",
+    description: "Basic features plus guest email confirmations and branded restaurant details.",
+    priceMonthly: 20,
+    unitAmount: 2000,
+    currency: "AUD",
+    priceEnv: "STRIPE_PRO_PRICE_ID"
+  }
+};
 
 let dataWriteQueue = Promise.resolve();
 let sessionSecret = "";
 let emailTransporter = null;
 let emailTransporterKey = "";
+let stripeClient = null;
+let stripeClientKey = "";
 
 function numberFromEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -246,6 +269,11 @@ function activeBooking(booking) {
   return booking.status !== "cancelled" && booking.status !== "no_show";
 }
 
+function restaurantAcceptsBookings(restaurant) {
+  const status = String(restaurant.subscriptionStatus || "trialing");
+  return !["canceled", "unpaid", "incomplete", "incomplete_expired"].includes(status);
+}
+
 function makeBookingCode(bookings) {
   const existing = new Set(bookings.map(function (booking) {
     return String(booking.code || "").toUpperCase();
@@ -286,18 +314,78 @@ function publicRestaurant(restaurant) {
     openingTime: servicePeriods[0].openingTime,
     closingTime: servicePeriods[servicePeriods.length - 1].closingTime,
     servicePeriods: servicePeriods,
-    maxPartySize: restaurant.maxPartySize
+    maxPartySize: restaurant.maxPartySize,
+    acceptingBookings: restaurantAcceptsBookings(restaurant)
   };
 }
 
+function publicBillingPlans() {
+  return Object.values(BILLING_PLANS).map(function (plan) {
+    return {
+      key: plan.key,
+      name: plan.name,
+      description: plan.description,
+      priceMonthly: plan.priceMonthly,
+      currency: plan.currency
+    };
+  });
+}
+
+function stripeSecretKey() {
+  return String(process.env.STRIPE_SECRET_KEY || "").trim();
+}
+
+function stripeWebhookSecret() {
+  return String(process.env.STRIPE_WEBHOOK_SECRET || "").trim();
+}
+
+function stripeConfigured() {
+  return Boolean(stripeSecretKey());
+}
+
+function getStripeClient() {
+  const key = stripeSecretKey();
+  if (!key) return null;
+  if (!stripeClient || stripeClientKey !== key) {
+    stripeClient = new Stripe(key);
+    stripeClientKey = key;
+  }
+  return stripeClient;
+}
+
+function planFromKey(value) {
+  const key = String(value || "basic").trim().toLowerCase();
+  return BILLING_PLANS[key] || null;
+}
+
+function planFromRestaurant(restaurant) {
+  return planFromKey(restaurant.stripePlanKey) ||
+    (Number(restaurant.priceMonthly) >= 20 ? BILLING_PLANS.pro : BILLING_PLANS.basic);
+}
+
+function hasManageableSubscription(restaurant) {
+  if (!restaurant.stripeSubscriptionId) return false;
+  return !["canceled", "incomplete_expired"].includes(String(restaurant.subscriptionStatus || ""));
+}
+
 function ownerRestaurant(restaurant) {
+  const plan = planFromRestaurant(restaurant);
   return {
     ...publicRestaurant(restaurant),
     id: restaurant.id,
-    plan: restaurant.plan,
-    priceMonthly: restaurant.priceMonthly,
-    currency: restaurant.currency,
+    plan: restaurant.plan || plan.name,
+    stripePlanKey: plan.key,
+    priceMonthly: Number(restaurant.priceMonthly || plan.priceMonthly),
+    currency: restaurant.currency || plan.currency,
     subscriptionStatus: restaurant.subscriptionStatus,
+    stripeCurrentPeriodEnd: restaurant.stripeCurrentPeriodEnd,
+    billing: {
+      stripeConfigured: stripeConfigured(),
+      hasStripeCustomer: Boolean(restaurant.stripeCustomerId),
+      hasStripeSubscription: Boolean(restaurant.stripeSubscriptionId),
+      canManageBilling: stripeConfigured() && Boolean(restaurant.stripeCustomerId),
+      plans: publicBillingPlans()
+    },
     timeSlotCapacity: restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20),
     trialEndsAt: restaurant.trialEndsAt,
     mustChangePassword: Boolean(restaurant.mustChangePassword)
@@ -420,7 +508,7 @@ async function authenticatedRestaurant(request) {
   return restaurants.find(function (restaurant) { return restaurant.id === token.restaurantId; }) || null;
 }
 
-async function readJsonBody(request) {
+async function readRawBody(request) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -428,9 +516,14 @@ async function readJsonBody(request) {
     if (size > MAX_BODY_BYTES) throw new Error("Request body is too large.");
     chunks.push(chunk);
   }
-  if (!chunks.length) return {};
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(request) {
+  const body = await readRawBody(request);
+  if (!body.length) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(body.toString("utf8"));
   } catch {
     throw new Error("Request body must be valid JSON.");
   }
@@ -696,6 +789,130 @@ async function findRestaurantBySlug(slug) {
   return restaurants.find(function (restaurant) { return restaurant.slug === slug; }) || null;
 }
 
+function stripeObjectId(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return String(value.id || "");
+}
+
+function stripeLineItem(plan) {
+  const priceId = String(process.env[plan.priceEnv] || "").trim();
+  if (priceId) {
+    return { price: priceId, quantity: 1 };
+  }
+  return {
+    quantity: 1,
+    price_data: {
+      currency: plan.currency.toLowerCase(),
+      unit_amount: plan.unitAmount,
+      recurring: { interval: "month" },
+      product_data: {
+        name: plan.name,
+        description: plan.description
+      }
+    }
+  };
+}
+
+function planFromStripePrice(price) {
+  const priceId = stripeObjectId(price);
+  if (priceId) {
+    const matched = Object.values(BILLING_PLANS).find(function (plan) {
+      return String(process.env[plan.priceEnv] || "").trim() === priceId;
+    });
+    if (matched) return matched;
+  }
+  const unitAmount = Number(price && price.unit_amount);
+  if (unitAmount >= BILLING_PLANS.pro.unitAmount) return BILLING_PLANS.pro;
+  return BILLING_PLANS.basic;
+}
+
+function planFromSubscription(subscription) {
+  const metadataPlan = planFromKey(subscription && subscription.metadata && subscription.metadata.plan);
+  if (metadataPlan) return metadataPlan;
+  const firstItem = subscription &&
+    subscription.items &&
+    Array.isArray(subscription.items.data) &&
+    subscription.items.data[0];
+  return planFromStripePrice(firstItem && firstItem.price);
+}
+
+function normalizeStripeStatus(status) {
+  const value = String(status || "").trim().toLowerCase();
+  if (["active", "trialing", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired"].includes(value)) {
+    return value;
+  }
+  return value || "unknown";
+}
+
+function stripePeriodEnd(subscription) {
+  const seconds = Number(subscription && subscription.current_period_end);
+  return Number.isFinite(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString() : "";
+}
+
+function applyBillingPlan(restaurant, plan) {
+  restaurant.plan = plan.name;
+  restaurant.stripePlanKey = plan.key;
+  restaurant.priceMonthly = plan.priceMonthly;
+  restaurant.currency = plan.currency;
+}
+
+async function updateRestaurantBilling(restaurantId, updater) {
+  let updated = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const restaurant = restaurants.find(function (candidate) { return candidate.id === restaurantId; });
+    if (!restaurant) return;
+    updater(restaurant);
+    restaurant.updatedAt = new Date().toISOString();
+    updated = restaurant;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  return updated;
+}
+
+async function applyCheckoutSessionBilling(session) {
+  const restaurantId = String((session.metadata && session.metadata.restaurantId) || session.client_reference_id || "");
+  const plan = planFromKey(session.metadata && session.metadata.plan) || BILLING_PLANS.basic;
+  if (!restaurantId) return null;
+  return updateRestaurantBilling(restaurantId, function (restaurant) {
+    applyBillingPlan(restaurant, plan);
+    restaurant.subscriptionStatus = "active";
+    restaurant.stripeCustomerId = stripeObjectId(session.customer);
+    restaurant.stripeSubscriptionId = stripeObjectId(session.subscription);
+    restaurant.stripeCheckoutSessionId = session.id;
+    restaurant.stripeLastPaymentAt = new Date().toISOString();
+  });
+}
+
+async function applySubscriptionBilling(subscription, forcedStatus) {
+  const restaurantId = String(subscription.metadata && subscription.metadata.restaurantId || "");
+  const subscriptionId = stripeObjectId(subscription);
+  const customerId = stripeObjectId(subscription.customer);
+  const plan = planFromSubscription(subscription);
+  let updated = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const restaurant = restaurants.find(function (candidate) {
+      return (restaurantId && candidate.id === restaurantId) ||
+        (subscriptionId && candidate.stripeSubscriptionId === subscriptionId) ||
+        (customerId && candidate.stripeCustomerId === customerId);
+    });
+    if (!restaurant) return;
+    applyBillingPlan(restaurant, plan);
+    restaurant.subscriptionStatus = forcedStatus || normalizeStripeStatus(subscription.status);
+    restaurant.stripeCustomerId = customerId || restaurant.stripeCustomerId;
+    restaurant.stripeSubscriptionId = subscriptionId || restaurant.stripeSubscriptionId;
+    restaurant.stripeCurrentPeriodEnd = stripePeriodEnd(subscription);
+    restaurant.updatedAt = new Date().toISOString();
+    updated = restaurant;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  return updated;
+}
+
 async function handleRegister(request, response) {
   const input = await parseBody(request, response);
   if (!input) return;
@@ -743,7 +960,8 @@ async function handleRegister(request, response) {
       servicePeriods: settings.servicePeriods,
       maxPartySize: settings.maxPartySize,
       timeSlotCapacity: settings.timeSlotCapacity,
-      plan: "TenSeat",
+      plan: BILLING_PLANS.basic.name,
+      stripePlanKey: BILLING_PLANS.basic.key,
       priceMonthly: 10,
       currency: "AUD",
       subscriptionStatus: "trialing",
@@ -842,6 +1060,128 @@ async function handleChangePassword(request, response) {
   sendJson(response, 200, { ok: true, restaurant: ownerRestaurant(updated) });
 }
 
+async function handleBillingCheckout(request, response) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const plan = planFromKey(input.plan);
+  if (!plan) return sendJson(response, 400, { ok: false, error: "Choose a valid plan." });
+  if (hasManageableSubscription(restaurant)) {
+    return sendJson(response, 409, { ok: false, error: "This restaurant already has a Stripe subscription. Use Manage billing to update it." });
+  }
+  const stripe = getStripeClient();
+  if (!stripe) return sendJson(response, 503, { ok: false, error: "Stripe is not configured yet." });
+
+  const baseUrl = publicBaseUrl(request).replace(/\/$/, "");
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: restaurant.stripeCustomerId || undefined,
+      customer_email: restaurant.stripeCustomerId ? undefined : restaurant.ownerEmail,
+      client_reference_id: restaurant.id,
+      line_items: [stripeLineItem(plan)],
+      success_url: baseUrl + "/owner?billing=success&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: baseUrl + "/owner?billing=cancelled",
+      allow_promotion_codes: true,
+      billing_address_collection: "auto",
+      metadata: {
+        restaurantId: restaurant.id,
+        plan: plan.key
+      },
+      subscription_data: {
+        metadata: {
+          restaurantId: restaurant.id,
+          plan: plan.key
+        }
+      }
+    });
+    await updateRestaurantBilling(restaurant.id, function (record) {
+      record.pendingStripePlanKey = plan.key;
+      record.stripePendingCheckoutSessionId = session.id;
+      record.stripePendingCheckoutAt = new Date().toISOString();
+    });
+    sendJson(response, 200, { ok: true, url: session.url, sessionId: session.id });
+  } catch (error) {
+    console.error("Stripe checkout failed:", error.message);
+    sendJson(response, 502, { ok: false, error: "Stripe checkout could not be created. Check the Stripe settings." });
+  }
+}
+
+async function handleBillingPortal(request, response) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const stripe = getStripeClient();
+  if (!stripe) return sendJson(response, 503, { ok: false, error: "Stripe is not configured yet." });
+  if (!restaurant.stripeCustomerId) return sendJson(response, 400, { ok: false, error: "This restaurant does not have a Stripe customer yet." });
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: restaurant.stripeCustomerId,
+      return_url: publicBaseUrl(request).replace(/\/$/, "") + "/owner?billing=portal"
+    });
+    sendJson(response, 200, { ok: true, url: session.url });
+  } catch (error) {
+    console.error("Stripe portal failed:", error.message);
+    sendJson(response, 502, { ok: false, error: "Stripe billing portal could not be opened. Check the Stripe portal settings." });
+  }
+}
+
+async function handleBillingCheckoutSession(request, response, requestUrl) {
+  const restaurant = await authenticatedRestaurant(request);
+  if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const stripe = getStripeClient();
+  if (!stripe) return sendJson(response, 503, { ok: false, error: "Stripe is not configured yet." });
+  const sessionId = String(requestUrl.searchParams.get("session_id") || "");
+  if (!/^cs_(test|live)_[A-Za-z0-9_]+$/.test(sessionId)) {
+    return sendJson(response, 400, { ok: false, error: "Stripe session id is invalid." });
+  }
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const restaurantId = String((session.metadata && session.metadata.restaurantId) || session.client_reference_id || "");
+    if (restaurantId !== restaurant.id) return sendJson(response, 403, { ok: false, error: "This Stripe session belongs to another restaurant." });
+    let updated = restaurant;
+    if (session.status === "complete") {
+      updated = await applyCheckoutSessionBilling(session) || restaurant;
+    }
+    sendJson(response, 200, { ok: true, restaurant: ownerRestaurant(updated), sessionStatus: session.status });
+  } catch (error) {
+    console.error("Stripe session lookup failed:", error.message);
+    sendJson(response, 502, { ok: false, error: "Stripe session could not be checked right now." });
+  }
+}
+
+async function handleStripeWebhook(request, response) {
+  const stripe = getStripeClient();
+  const endpointSecret = stripeWebhookSecret();
+  if (!stripe || !endpointSecret) return sendJson(response, 503, { ok: false, error: "Stripe webhook is not configured." });
+  let rawBody;
+  try {
+    rawBody = await readRawBody(request);
+  } catch (error) {
+    return sendJson(response, 400, { ok: false, error: error.message });
+  }
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, request.headers["stripe-signature"], endpointSecret);
+  } catch (error) {
+    return sendJson(response, 400, { ok: false, error: "Stripe webhook signature verification failed." });
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      await applyCheckoutSessionBilling(event.data.object);
+    } else if (event.type === "customer.subscription.created" || event.type === "customer.subscription.updated") {
+      await applySubscriptionBilling(event.data.object);
+    } else if (event.type === "customer.subscription.deleted") {
+      await applySubscriptionBilling(event.data.object, "canceled");
+    }
+  } catch (error) {
+    console.error("Stripe webhook processing failed:", error.message);
+    return sendJson(response, 500, { ok: false, error: "Stripe webhook could not be processed." });
+  }
+  sendJson(response, 200, { ok: true, received: true });
+}
+
 async function handleOwnerTestEmail(request, response) {
   const restaurant = await authenticatedRestaurant(request);
   if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
@@ -872,6 +1212,9 @@ async function handleOwnerTestEmail(request, response) {
 }
 
 async function handleCreateBooking(request, response, restaurant) {
+  if (!restaurantAcceptsBookings(restaurant)) {
+    return sendJson(response, 403, { ok: false, error: "This restaurant is not accepting online bookings right now." });
+  }
   const input = await parseBody(request, response);
   if (!input) return;
   const validationError = validateBooking(input, restaurant);
@@ -1111,6 +1454,7 @@ async function route(request, response) {
   const restaurantMatch = pathname.match(/^\/api\/restaurants\/([a-z0-9-]+)(?:\/(bookings|cancel))?$/);
   const ownerBookingMatch = pathname.match(/^\/api\/owner\/bookings\/([A-Z0-9-]+)$/i);
 
+  if (request.method === "POST" && pathname === "/api/stripe/webhook") return handleStripeWebhook(request, response);
   if (pathname.startsWith("/api/") && enforceRateLimit(request, response, "api", RATE_LIMIT_RULES.api)) return;
 
   if (request.method === "GET" && pathname === "/api/health") {
@@ -1127,6 +1471,9 @@ async function route(request, response) {
   if (request.method === "GET" && pathname === "/api/owner/me") return handleOwnerMe(request, response);
   if (request.method === "PATCH" && pathname === "/api/owner/me") return handleUpdateRestaurant(request, response);
   if (request.method === "POST" && pathname === "/api/owner/change-password") return handleChangePassword(request, response);
+  if (request.method === "POST" && pathname === "/api/owner/billing/checkout") return handleBillingCheckout(request, response);
+  if (request.method === "POST" && pathname === "/api/owner/billing/portal") return handleBillingPortal(request, response);
+  if (request.method === "GET" && pathname === "/api/owner/billing/checkout-session") return handleBillingCheckoutSession(request, response, requestUrl);
   if (request.method === "POST" && pathname === "/api/owner/test-email") return handleOwnerTestEmail(request, response);
   if (request.method === "GET" && pathname === "/api/owner/bookings") return handleOwnerBookings(request, response, requestUrl);
   if (request.method === "POST" && pathname === "/api/owner/bookings") return handleOwnerCreateBooking(request, response);
@@ -1264,6 +1611,27 @@ async function ensureData() {
     if (!Number.isInteger(Number(restaurant.timeSlotCapacity)) ||
         Number(restaurant.timeSlotCapacity) < Number(restaurant.maxPartySize || 1)) {
       restaurant.timeSlotCapacity = Math.max(Number(restaurant.maxPartySize || 1), 20);
+      restaurantsChanged = true;
+    }
+    const billingPlan = planFromRestaurant(restaurant);
+    if (!restaurant.stripePlanKey) {
+      restaurant.stripePlanKey = billingPlan.key;
+      restaurantsChanged = true;
+    }
+    if (!restaurant.plan) {
+      restaurant.plan = billingPlan.name;
+      restaurantsChanged = true;
+    }
+    if (!restaurant.priceMonthly) {
+      restaurant.priceMonthly = billingPlan.priceMonthly;
+      restaurantsChanged = true;
+    }
+    if (!restaurant.currency) {
+      restaurant.currency = billingPlan.currency;
+      restaurantsChanged = true;
+    }
+    if (!restaurant.subscriptionStatus) {
+      restaurant.subscriptionStatus = "trialing";
       restaurantsChanged = true;
     }
   });

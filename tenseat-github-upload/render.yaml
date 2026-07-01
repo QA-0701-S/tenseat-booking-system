@@ -21,3 +21,11 @@ services:
         generateValue: true
       - key: PUBLIC_ORIGIN
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_BASIC_PRICE_ID
+        sync: false
+      - key: STRIPE_PRO_PRICE_ID
+        sync: false

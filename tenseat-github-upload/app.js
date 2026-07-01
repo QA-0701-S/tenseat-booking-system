@@ -88,6 +88,14 @@ function applyRestaurant() {
   var mapQuery = encodeURIComponent(restaurant.googleMapsQuery || restaurant.address || restaurant.name);
   el.googleMap.src = "https://www.google.com/maps?q=" + mapQuery + "&output=embed";
   el.openMaps.href = "https://www.google.com/maps/search/?api=1&query=" + mapQuery;
+  setBookingFormDisabled(restaurant.acceptingBookings === false);
+}
+
+function setBookingFormDisabled(isDisabled) {
+  Array.prototype.forEach.call(el.form.elements, function (field) {
+    field.disabled = isDisabled;
+  });
+  if (!isDisabled) el.submit.disabled = true;
 }
 
 function wireEvents() {
@@ -182,10 +190,17 @@ function syncTimeFromPicker() {
 
 function updateAvailability() {
   if (!restaurant) return;
-  var message = getDateValidationMessage() || getTimeValidationMessage();
+  var message = getBookingAvailabilityMessage() || getDateValidationMessage() || getTimeValidationMessage();
   el.timeStatus.textContent = message || "Available - 24-hour time";
   el.timeStatus.classList.toggle("available", !message);
   updateSummary();
+}
+
+function getBookingAvailabilityMessage() {
+  if (restaurant && restaurant.acceptingBookings === false) {
+    return "Online bookings are unavailable right now.";
+  }
+  return "";
 }
 
 function getDateValidationMessage() {
@@ -220,7 +235,7 @@ function getTimeValidationMessage() {
 
 async function handleBookingSubmit(event) {
   event.preventDefault();
-  var validationMessage = getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
+  var validationMessage = getBookingAvailabilityMessage() || getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
   if (validationMessage) return showToast(validationMessage);
 
   var confirmedCode = "";
@@ -381,7 +396,12 @@ function updateCancelState() {
 
 function updateSummary() {
   if (!restaurant) return;
-  var validationMessage = getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
+  var validationMessage = getBookingAvailabilityMessage() || getDateValidationMessage() || getGuestValidationMessage() || getTimeValidationMessage();
+  if (restaurant.acceptingBookings === false) {
+    el.summary.textContent = "Online bookings are unavailable right now.";
+    el.submit.disabled = true;
+    return;
+  }
   if (!el.date.value || !el.time.value) {
     el.summary.textContent = "Choose a date, guest details, party size, and time.";
     el.submit.disabled = true;

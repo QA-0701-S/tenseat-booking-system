@@ -6,6 +6,7 @@ var API_BASE = isFilePreview ? "http://127.0.0.1:8795" : "";
 var token = sessionStorage.getItem("tenseatOwnerToken") || "";
 var restaurant = null;
 var loading = false;
+var billingReturnHandled = false;
 
 var el = {
   accessView: document.getElementById("accessView"),
@@ -48,7 +49,13 @@ var el = {
   ownerBookingTime: document.getElementById("ownerBookingTime"),
   ownerPartySize: document.getElementById("ownerPartySize"),
   ownerBookingNotes: document.getElementById("ownerBookingNotes"),
+  currentPlanName: document.getElementById("currentPlanName"),
+  billingMeta: document.getElementById("billingMeta"),
   planStatus: document.getElementById("planStatus"),
+  subscribeBasic: document.getElementById("subscribeBasicButton"),
+  subscribePro: document.getElementById("subscribeProButton"),
+  manageBilling: document.getElementById("manageBillingButton"),
+  billingNote: document.getElementById("billingNote"),
   bookingLink: document.getElementById("bookingLink"),
   copyLink: document.getElementById("copyLinkButton"),
   openBookingLink: document.getElementById("openBookingLink"),
@@ -85,6 +92,9 @@ function init() {
   el.copyLink.addEventListener("click", copyBookingLink);
   el.settingsForm.addEventListener("submit", saveSettings);
   el.passwordForm.addEventListener("submit", changePassword);
+  el.subscribeBasic.addEventListener("click", function () { startStripeCheckout("basic"); });
+  el.subscribePro.addEventListener("click", function () { startStripeCheckout("pro"); });
+  el.manageBilling.addEventListener("click", openBillingPortal);
   if (new URLSearchParams(window.location.search).get("mode") === "register") showAuthMode("register");
   if (token) restoreSession();
 }
@@ -161,6 +171,7 @@ function showDashboard() {
     showView("bookings");
     loadBookings();
   }
+  handleBillingReturn();
 }
 
 function applyRestaurant() {
@@ -183,8 +194,43 @@ function applyRestaurant() {
   var link = localBookingOrigin() + "/r/" + restaurant.slug;
   el.bookingLink.value = link;
   el.openBookingLink.href = link;
-  el.planStatus.textContent = restaurant.subscriptionStatus === "active" ? "Active" : "Trial";
+  el.currentPlanName.textContent = (restaurant.plan || "TenSeat Basic") + " - A$" + Number(restaurant.priceMonthly || 10) + "/month";
+  el.planStatus.textContent = subscriptionLabel(restaurant.subscriptionStatus);
+  el.billingMeta.textContent = billingMetaText();
+  applyBillingButtons();
   el.securityAlert.hidden = !restaurant.mustChangePassword;
+}
+
+function subscriptionLabel(status) {
+  var value = String(status || "trialing").replace(/_/g, " ");
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function billingMetaText() {
+  var billing = restaurant.billing || {};
+  if (!billing.stripeConfigured) return "Stripe not configured";
+  if (restaurant.stripeCurrentPeriodEnd) return "Renews " + formatDate(restaurant.stripeCurrentPeriodEnd.slice(0, 10));
+  if (billing.hasStripeSubscription) return "Stripe subscription connected";
+  return "Ready for Stripe Checkout";
+}
+
+function applyBillingButtons() {
+  var billing = restaurant.billing || {};
+  var stripeReady = Boolean(billing.stripeConfigured);
+  var hasSubscription = Boolean(billing.hasStripeSubscription);
+  var currentPlan = restaurant.stripePlanKey || "basic";
+  el.subscribeBasic.disabled = !stripeReady || hasSubscription || currentPlan === "basic" && restaurant.subscriptionStatus === "active";
+  el.subscribePro.disabled = !stripeReady || hasSubscription || currentPlan === "pro" && restaurant.subscriptionStatus === "active";
+  el.manageBilling.disabled = !billing.canManageBilling;
+  el.subscribeBasic.textContent = currentPlan === "basic" && hasSubscription ? "Current plan" : "Subscribe Basic";
+  el.subscribePro.textContent = currentPlan === "pro" && hasSubscription ? "Current plan" : "Subscribe Pro";
+  if (!stripeReady) {
+    el.billingNote.textContent = "Stripe checkout is available after Stripe keys are configured.";
+  } else if (hasSubscription) {
+    el.billingNote.textContent = "Use Manage billing for card updates, invoices, subscription changes, or cancellation.";
+  } else {
+    el.billingNote.textContent = "Payments are handled securely by Stripe Checkout.";
+  }
 }
 
 function localBookingOrigin() {
@@ -406,6 +452,84 @@ function formatServicePeriods() {
 function toMinutes(time) {
   var parts = time.split(":").map(Number);
   return parts[0] * 60 + parts[1];
+}
+
+async function startStripeCheckout(plan) {
+  try {
+    setBillingLoading(true);
+    var result = await jsonRequest("/api/owner/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan: plan })
+    });
+    window.location.href = result.url;
+  } catch (error) {
+    showToast(error.message);
+    setBillingLoading(false);
+  }
+}
+
+async function openBillingPortal() {
+  try {
+    setBillingLoading(true);
+    var result = await jsonRequest("/api/owner/billing/portal", { method: "POST" });
+    window.location.href = result.url;
+  } catch (error) {
+    showToast(error.message);
+    setBillingLoading(false);
+  }
+}
+
+async function handleBillingReturn() {
+  if (billingReturnHandled || !token) return;
+  var params = new URLSearchParams(window.location.search);
+  var billing = params.get("billing");
+  if (!billing) return;
+  billingReturnHandled = true;
+  if (billing === "cancelled") {
+    showToast("Stripe checkout was cancelled.");
+    cleanBillingUrl();
+    return;
+  }
+  if (billing === "portal") {
+    showToast("Billing page closed.");
+    cleanBillingUrl();
+    restoreSession();
+    return;
+  }
+  if (billing === "success") {
+    var sessionId = params.get("session_id");
+    if (!sessionId) {
+      showToast("Payment completed. Refreshing billing status.");
+      cleanBillingUrl();
+      restoreSession();
+      return;
+    }
+    try {
+      var result = await jsonRequest("/api/owner/billing/checkout-session?session_id=" + encodeURIComponent(sessionId), { method: "GET" });
+      if (result.restaurant) {
+        restaurant = result.restaurant;
+        applyRestaurant();
+      }
+      showToast("Payment confirmed. Billing is active.");
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      cleanBillingUrl();
+    }
+  }
+}
+
+function cleanBillingUrl() {
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState({}, document.title, "/owner");
+  }
+}
+
+function setBillingLoading(isLoading) {
+  el.subscribeBasic.disabled = isLoading || el.subscribeBasic.disabled;
+  el.subscribePro.disabled = isLoading || el.subscribePro.disabled;
+  el.manageBilling.disabled = isLoading || el.manageBilling.disabled;
+  if (!isLoading && restaurant) applyBillingButtons();
 }
 
 async function changePassword(event) {

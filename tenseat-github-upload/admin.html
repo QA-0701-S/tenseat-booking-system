@@ -133,8 +133,34 @@
           </section>
 
           <section class="plan-band">
-            <div><span>Current plan</span><strong>TenSeat - A$10/month</strong></div>
+            <div>
+              <span>Current plan</span>
+              <strong id="currentPlanName">TenSeat Basic - A$10/month</strong>
+              <small id="billingMeta">Stripe not connected</small>
+            </div>
             <span class="plan-status" id="planStatus">Trial</span>
+          </section>
+
+          <section class="settings-section">
+            <header><h2>Billing</h2></header>
+            <div class="billing-panel">
+              <article class="billing-card">
+                <span>Basic</span>
+                <strong>A$10/month</strong>
+                <p>Booking page, Google Maps link, dashboard, booking codes, cancellations, capacity, and manual bookings.</p>
+                <button class="quiet-button" id="subscribeBasicButton" type="button">Subscribe Basic</button>
+              </article>
+              <article class="billing-card featured">
+                <span>Pro</span>
+                <strong>A$20/month</strong>
+                <p>Basic plus guest email confirmations, branded restaurant details, logo, cover image, Instagram, and menu links.</p>
+                <button class="primary-button" id="subscribeProButton" type="button">Subscribe Pro</button>
+              </article>
+              <div class="billing-actions">
+                <button class="quiet-button" id="manageBillingButton" type="button">Manage billing</button>
+                <p id="billingNote">Stripe checkout is available after Stripe keys are configured.</p>
+              </div>
+            </div>
           </section>
 
           <section class="settings-section">

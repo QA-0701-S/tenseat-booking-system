@@ -1,6 +1,6 @@
 # TenSeat Booking System
 
-TenSeat is a multi-restaurant booking system. The planned subscription price is A$10/month. Real Stripe billing is not connected yet.
+TenSeat is a multi-restaurant booking system with Stripe subscription billing for A$10/month Basic and A$20/month Pro plans.
 
 ## Local Start
 
@@ -35,6 +35,10 @@ The dashboard warns the owner to change this default password. Before real use, 
 - The restaurant dashboard shows bookings, guest count, phone number, email, notes, cancelled bookings, no-shows, and booking codes.
 - Restaurant staff can add manual phone or walk-in bookings.
 - Restaurant staff can cancel bookings, mark no-shows, and restore bookings.
+- Stripe Checkout supports Basic and Pro monthly subscriptions from the restaurant dashboard.
+- Stripe webhooks update restaurant subscription status after checkout, updates, and cancellations.
+- Stripe Billing Portal lets subscribed restaurants manage payment methods, invoices, and cancellation.
+- Cancelled, unpaid, or incomplete subscriptions pause new online bookings without deleting existing bookings.
 - Booking codes use a short format such as `TS-8K42PA`.
 - Passwords are salted and hashed.
 - Basic rate limits are enabled for login, registration, booking, and cancellation endpoints.
@@ -46,6 +50,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Guest phone numbers are only returned to authenticated restaurant dashboard APIs. Public booking and cancellation responses do not expose phone numbers or internal booking IDs.
 - Keep `SESSION_SECRET` private and at least 32 characters long.
 - Use HTTPS in production and set `PUBLIC_ORIGIN` to the real website URL.
+- Keep `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` private. Never commit live Stripe keys.
 - JSON file storage is acceptable for an MVP, but a paid multi-customer version should move to Postgres, Supabase, or another managed database with backups and persistent storage.
 - Add Privacy Policy, Terms, and subscription/cancellation terms before charging restaurants.
 
@@ -70,9 +75,26 @@ DATA_DIR=/var/data/tenseat
 GMAIL_USER=your-gmail-address@gmail.com
 GMAIL_APP_PASSWORD=your-16-character-google-app-password
 EMAIL_FROM_NAME=TenSeat
+STRIPE_SECRET_KEY=sk_test_or_live_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+STRIPE_BASIC_PRICE_ID=price_basic_monthly_optional
+STRIPE_PRO_PRICE_ID=price_pro_monthly_optional
 ```
 
 Gmail sending requires a Google App Password. A normal Gmail login password should not be used. Spaces in the App Password are removed automatically.
+
+`STRIPE_BASIC_PRICE_ID` and `STRIPE_PRO_PRICE_ID` are optional. If they are empty, the app creates Checkout Sessions with inline A$10/month and A$20/month prices. For a cleaner production Stripe dashboard, create recurring monthly Price IDs in Stripe and add them here.
+
+## Stripe Setup
+
+1. Create or log in to a Stripe account.
+2. Use test mode first.
+3. Add `STRIPE_SECRET_KEY` in Render.
+4. In Stripe, create a webhook endpoint for `https://your-domain.com/api/stripe/webhook`.
+5. Subscribe to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`.
+6. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET` in Render.
+7. Optional: create monthly recurring prices for Basic A$10 and Pro A$20, then add their Price IDs to Render.
+8. Redeploy the Render service and test Billing from `/owner`.
 
 ## Render Steps
 
