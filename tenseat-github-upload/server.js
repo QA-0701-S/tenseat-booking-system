@@ -23,6 +23,7 @@ const TRIAL_DAYS = numberFromEnv("TRIAL_DAYS", 14);
 const REFERRAL_TRIAL_DAYS = numberFromEnv("REFERRAL_TRIAL_DAYS", 30);
 const MAX_REFERRAL_CREDITS = numberFromEnv("MAX_REFERRAL_CREDITS", 12);
 const LEGAL_VERSION = "2026-07-01";
+const PASSWORD_RESET_MINUTES = numberFromEnv("PASSWORD_RESET_MINUTES", 60);
 const EMAIL_CONNECT_TIMEOUT_MS = numberFromEnv("EMAIL_CONNECT_TIMEOUT_MS", 10000);
 const EMAIL_SOCKET_TIMEOUT_MS = numberFromEnv("EMAIL_SOCKET_TIMEOUT_MS", 15000);
 const EMAIL_SEND_TIMEOUT_MS = numberFromEnv("EMAIL_SEND_TIMEOUT_MS", 20000);
@@ -47,7 +48,10 @@ const PUBLIC_FILES = new Map([
   ["/owner", ["admin.html", "text/html; charset=utf-8"]],
   ["/admin.html", ["admin.html", "text/html; charset=utf-8"]],
   ["/admin.css", ["admin.css", "text/css; charset=utf-8"]],
-  ["/admin.js", ["admin.js", "text/javascript; charset=utf-8"]]
+  ["/admin.js", ["admin.js", "text/javascript; charset=utf-8"]],
+  ["/platform", ["platform.html", "text/html; charset=utf-8"]],
+  ["/platform.html", ["platform.html", "text/html; charset=utf-8"]],
+  ["/platform.js", ["platform.js", "text/javascript; charset=utf-8"]]
 ]);
 const BILLING_PLANS = {
   basic: {
@@ -277,7 +281,24 @@ function activeBooking(booking) {
   return booking.status !== "cancelled" && booking.status !== "no_show";
 }
 
+function approvalStatusFor(restaurant) {
+  return String(restaurant && restaurant.approvalStatus || "approved");
+}
+
+function accountStatusFor(restaurant) {
+  if (!restaurant) return "active";
+  if (restaurant.accountStatus) return String(restaurant.accountStatus);
+  return restaurant.suspendedAt ? "suspended" : "active";
+}
+
+function restaurantAccountPaused(restaurant) {
+  const approvalStatus = approvalStatusFor(restaurant);
+  const accountStatus = accountStatusFor(restaurant);
+  return accountStatus === "suspended" || approvalStatus === "pending" || approvalStatus === "rejected";
+}
+
 function restaurantAcceptsBookings(restaurant) {
+  if (restaurantAccountPaused(restaurant)) return false;
   if (restaurant && restaurant.billingExempt) return true;
   const status = String(restaurant.subscriptionStatus || "trialing");
   if (["canceled", "past_due", "unpaid", "incomplete", "incomplete_expired"].includes(status)) return false;
@@ -329,7 +350,7 @@ function makeReferralCode(existingCodes) {
 }
 
 function activePaidRestaurant(restaurant) {
-  return !restaurant.billingExempt && String(restaurant && restaurant.subscriptionStatus || "") === "active";
+  return !restaurant.billingExempt && !restaurantAccountPaused(restaurant) && String(restaurant && restaurant.subscriptionStatus || "") === "active";
 }
 
 function referralCreditMonths(restaurant) {
@@ -441,6 +462,10 @@ function ownerRestaurant(restaurant) {
     stripePlanKey: plan.key,
     priceMonthly: billingExempt ? 0 : Number(restaurant.priceMonthly || plan.priceMonthly),
     currency: restaurant.currency || plan.currency,
+    approvalStatus: approvalStatusFor(restaurant),
+    accountStatus: accountStatusFor(restaurant),
+    suspendedReason: restaurant.suspendedReason || "",
+    suspendedAt: restaurant.suspendedAt || "",
     subscriptionStatus: restaurant.subscriptionStatus,
     stripeCurrentPeriodEnd: restaurant.stripeCurrentPeriodEnd,
     acceptingBookings: restaurantAcceptsBookings(restaurant),
@@ -469,6 +494,30 @@ function ownerRestaurant(restaurant) {
     timeSlotCapacity: restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20),
     trialEndsAt: restaurant.trialEndsAt,
     mustChangePassword: Boolean(restaurant.mustChangePassword)
+  };
+}
+
+function platformRestaurant(restaurant) {
+  const plan = planFromRestaurant(restaurant);
+  return {
+    id: restaurant.id,
+    slug: restaurant.slug,
+    name: restaurant.name,
+    ownerEmail: restaurant.ownerEmail,
+    address: restaurant.address || "",
+    plan: restaurant.plan || plan.name,
+    priceMonthly: Number(restaurant.priceMonthly || 0),
+    subscriptionStatus: restaurant.subscriptionStatus || "",
+    approvalStatus: approvalStatusFor(restaurant),
+    accountStatus: accountStatusFor(restaurant),
+    suspendedReason: restaurant.suspendedReason || "",
+    billingExempt: Boolean(restaurant.billingExempt),
+    acceptingBookings: restaurantAcceptsBookings(restaurant),
+    createdAt: restaurant.createdAt || "",
+    approvedAt: restaurant.approvedAt || "",
+    suspendedAt: restaurant.suspendedAt || "",
+    trialEndsAt: restaurant.trialEndsAt || "",
+    referralCode: restaurant.referralCode || ""
   };
 }
 
@@ -558,6 +607,16 @@ function issueToken(restaurantId) {
   return payload + "." + signature;
 }
 
+function issuePlatformToken() {
+  const payload = Buffer.from(JSON.stringify({
+    platformAdmin: true,
+    expiresAt: Math.floor(Date.now() / 1000) + SESSION_SECONDS,
+    nonce: crypto.randomBytes(8).toString("hex")
+  })).toString("base64url");
+  const signature = crypto.createHmac("sha256", sessionSecret).update(payload).digest("base64url");
+  return payload + "." + signature;
+}
+
 function readToken(request) {
   const authorization = String(request.headers.authorization || "");
   if (!authorization.startsWith("Bearer ")) return null;
@@ -574,7 +633,7 @@ function readToken(request) {
   if (expected.length !== supplied.length || !crypto.timingSafeEqual(expected, supplied)) return null;
   try {
     const payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
-    if (!payload.restaurantId || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
+    if ((!payload.restaurantId && !payload.platformAdmin) || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;
@@ -586,6 +645,33 @@ async function authenticatedRestaurant(request) {
   if (!token) return null;
   const restaurants = await readArray(RESTAURANTS_FILE);
   return restaurants.find(function (restaurant) { return restaurant.id === token.restaurantId; }) || null;
+}
+
+function authenticatedPlatform(request) {
+  const token = readToken(request);
+  return Boolean(token && token.platformAdmin);
+}
+
+function platformAdminPassword() {
+  return String(process.env.PLATFORM_ADMIN_PASSWORD || process.env.TENSEAT_ADMIN_PASSWORD || "").trim();
+}
+
+function constantTimeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function resetTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function makeResetToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function passwordResetUrl(baseUrl, token) {
+  return baseUrl.replace(/\/$/, "") + "/owner?reset=" + encodeURIComponent(token);
 }
 
 async function readRawBody(request) {
@@ -864,6 +950,50 @@ async function sendBookingConfirmationEmail(options) {
   return { sent: true, to: recipient };
 }
 
+function passwordResetSubject(restaurant) {
+  return "Reset your TenSeat password - " + restaurant.name;
+}
+
+function passwordResetText(restaurant, resetUrl) {
+  return [
+    "A password reset was requested for your TenSeat restaurant account.",
+    "",
+    "Restaurant: " + restaurant.name,
+    "Reset link: " + resetUrl,
+    "",
+    "This link expires in " + PASSWORD_RESET_MINUTES + " minutes.",
+    "If you did not request this, you can ignore this email."
+  ].join("\n");
+}
+
+function passwordResetHtml(restaurant, resetUrl) {
+  return "<!doctype html><html><body style=\"margin:0;background:#f5f3ec;color:#18211f;font-family:Arial,sans-serif;\">" +
+    "<div style=\"max-width:620px;margin:0 auto;padding:28px 18px;\">" +
+    "<div style=\"background:#ffffff;border:1px solid #ddd9cd;border-radius:8px;overflow:hidden;\">" +
+    "<div style=\"padding:24px;background:#0a3f35;color:#ffffff;\"><p style=\"margin:0 0 8px;color:#c9952f;font-weight:800;letter-spacing:.08em;text-transform:uppercase;\">Password reset</p>" +
+    "<h1 style=\"margin:0;font-family:Georgia,serif;font-size:32px;\">TenSeat</h1></div>" +
+    "<div style=\"padding:24px;\"><p style=\"margin:0 0 16px;font-size:16px;line-height:1.5;\">A password reset was requested for " + escapeHtml(restaurant.name) + ".</p>" +
+    "<p style=\"margin:0 0 20px;\"><a href=\"" + escapeHtml(resetUrl) + "\" style=\"display:inline-block;padding:12px 16px;border-radius:6px;background:#11644f;color:#ffffff;font-weight:800;text-decoration:none;\">Reset password</a></p>" +
+    "<p style=\"margin:0;color:#65716c;font-size:14px;line-height:1.5;\">This link expires in " + PASSWORD_RESET_MINUTES + " minutes. If you did not request this, you can ignore this email.</p>" +
+    "</div></div></div></body></html>";
+}
+
+async function sendPasswordResetEmail(options) {
+  const recipient = normalizeEmail(options.to);
+  if (!recipient || !isValidEmail(recipient)) return emailStatusSkipped("invalid_recipient");
+  const config = emailConfig();
+  if (!config) return emailStatusSkipped("gmail_not_configured");
+  const transporter = getEmailTransporter();
+  await Promise.race([transporter.sendMail({
+    from: "\"" + config.fromName.replace(/"/g, "") + "\" <" + config.user + ">",
+    to: recipient,
+    subject: passwordResetSubject(options.restaurant),
+    text: passwordResetText(options.restaurant, options.resetUrl),
+    html: passwordResetHtml(options.restaurant, options.resetUrl)
+  }), timeoutAfter(EMAIL_SEND_TIMEOUT_MS, "Gmail did not respond within " + Math.round(EMAIL_SEND_TIMEOUT_MS / 1000) + " seconds.")]);
+  return { sent: true, to: recipient };
+}
+
 async function findRestaurantBySlug(slug) {
   const restaurants = await readArray(RESTAURANTS_FILE);
   return restaurants.find(function (restaurant) { return restaurant.slug === slug; }) || null;
@@ -1115,6 +1245,155 @@ async function applyReferralRewardForInvoice(invoice) {
   return persistReferralReward(candidate, stripeCredit);
 }
 
+async function handlePlatformLogin(request, response) {
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const password = platformAdminPassword();
+  if (!password || password.length < 12) {
+    return sendJson(response, 503, { ok: false, error: "Platform admin password is not configured." });
+  }
+  if (!constantTimeEqual(String(input.password || ""), password)) {
+    return sendJson(response, 401, { ok: false, error: "Password is incorrect." });
+  }
+  sendJson(response, 200, { ok: true, token: issuePlatformToken() });
+}
+
+async function handlePlatformRestaurants(request, response) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const restaurants = await readArray(RESTAURANTS_FILE);
+  sendJson(response, 200, {
+    ok: true,
+    restaurants: restaurants
+      .map(platformRestaurant)
+      .sort(function (left, right) {
+        return String(right.createdAt).localeCompare(String(left.createdAt));
+      })
+  });
+}
+
+async function handlePlatformRestaurantAction(request, response, restaurantId) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const action = String(input.action || "").trim().toLowerCase();
+  if (!["approve", "suspend", "restore"].includes(action)) {
+    return sendJson(response, 400, { ok: false, error: "Choose a valid platform action." });
+  }
+  let updated = null;
+  let missing = false;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const restaurant = restaurants.find(function (candidate) { return candidate.id === restaurantId; });
+    if (!restaurant) {
+      missing = true;
+      return;
+    }
+    const now = new Date().toISOString();
+    if (action === "approve") {
+      restaurant.approvalStatus = "approved";
+      restaurant.accountStatus = "active";
+      restaurant.approvedAt = restaurant.approvedAt || now;
+      restaurant.suspendedAt = "";
+      restaurant.suspendedReason = "";
+    } else if (action === "suspend") {
+      restaurant.accountStatus = "suspended";
+      restaurant.suspendedAt = now;
+      restaurant.suspendedReason = String(input.reason || "Paused by TenSeat admin").trim().slice(0, 180) || "Paused by TenSeat admin";
+    } else if (action === "restore") {
+      restaurant.accountStatus = "active";
+      restaurant.suspendedAt = "";
+      restaurant.suspendedReason = "";
+      if (approvalStatusFor(restaurant) === "rejected") restaurant.approvalStatus = "approved";
+      if (!restaurant.approvedAt) restaurant.approvedAt = now;
+    }
+    restaurant.updatedAt = now;
+    updated = restaurant;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  if (missing) return sendJson(response, 404, { ok: false, error: "Restaurant not found." });
+  sendJson(response, 200, { ok: true, restaurant: platformRestaurant(updated) });
+}
+
+async function handlePasswordResetRequest(request, response) {
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const email = normalizeEmail(input.email);
+  if (!isValidEmail(email)) {
+    return sendJson(response, 400, { ok: false, error: "Enter a valid login email." });
+  }
+  const token = makeResetToken();
+  const tokenHash = resetTokenHash(token);
+  let restaurantForEmail = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const restaurant = restaurants.find(function (candidate) { return normalizeEmail(candidate.ownerEmail) === email; });
+    if (!restaurant) return;
+    const now = Date.now();
+    restaurant.resetPasswordTokenHash = tokenHash;
+    restaurant.resetPasswordRequestedAt = new Date(now).toISOString();
+    restaurant.resetPasswordExpiresAt = new Date(now + PASSWORD_RESET_MINUTES * 60 * 1000).toISOString();
+    restaurant.updatedAt = new Date(now).toISOString();
+    restaurantForEmail = restaurant;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  if (restaurantForEmail) {
+    try {
+      const resetUrl = passwordResetUrl(publicBaseUrl(request), token);
+      const emailStatus = await sendPasswordResetEmail({
+        to: restaurantForEmail.ownerEmail,
+        restaurant: restaurantForEmail,
+        resetUrl: resetUrl
+      });
+      if (!emailStatus.sent) console.warn("Password reset email skipped:", emailStatus.reason);
+    } catch (error) {
+      console.error("Password reset email failed:", error.message);
+    }
+  }
+  sendJson(response, 200, {
+    ok: true,
+    message: "If that email is registered, a password reset link will be sent shortly."
+  });
+}
+
+async function handlePasswordResetConfirm(request, response) {
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const token = String(input.token || "").trim();
+  const password = String(input.password || "");
+  if (!/^[A-Za-z0-9_-]{30,120}$/.test(token)) {
+    return sendJson(response, 400, { ok: false, error: "Password reset link is invalid or expired." });
+  }
+  const passwordError = validatePassword(password);
+  if (passwordError) return sendJson(response, 400, { ok: false, error: passwordError });
+  const passwordFields = await passwordRecord(password);
+  const tokenHash = resetTokenHash(token);
+  let updated = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const now = Date.now();
+    const restaurant = restaurants.find(function (candidate) {
+      return candidate.resetPasswordTokenHash === tokenHash &&
+        new Date(candidate.resetPasswordExpiresAt || 0).getTime() > now;
+    });
+    if (!restaurant) return;
+    restaurant.passwordSalt = passwordFields.passwordSalt;
+    restaurant.passwordHash = passwordFields.passwordHash;
+    restaurant.mustChangePassword = false;
+    restaurant.resetPasswordTokenHash = "";
+    restaurant.resetPasswordRequestedAt = "";
+    restaurant.resetPasswordExpiresAt = "";
+    restaurant.passwordResetAt = new Date(now).toISOString();
+    restaurant.updatedAt = new Date(now).toISOString();
+    updated = restaurant;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  if (!updated) return sendJson(response, 400, { ok: false, error: "Password reset link is invalid or expired." });
+  sendJson(response, 200, { ok: true, token: issueToken(updated.id), restaurant: ownerRestaurant(updated) });
+}
+
 async function handleRegister(request, response) {
   const input = await parseBody(request, response);
   if (!input) return;
@@ -1197,6 +1476,8 @@ async function handleRegister(request, response) {
       stripePlanKey: BILLING_PLANS.basic.key,
       priceMonthly: 10,
       currency: "AUD",
+      approvalStatus: "pending",
+      accountStatus: "active",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
       trialDays: appliedTrialDays,
@@ -1308,6 +1589,9 @@ async function handleBillingCheckout(request, response) {
   if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
+  if (restaurantAccountPaused(restaurant)) {
+    return sendJson(response, 403, { ok: false, error: "This restaurant account must be approved by TenSeat before billing can start." });
+  }
   if (restaurant.billingExempt) {
     return sendJson(response, 409, { ok: false, error: "This restaurant has a permanent free account and does not need Stripe billing." });
   }
@@ -1705,6 +1989,7 @@ async function route(request, response) {
   const pathname = requestUrl.pathname;
   const restaurantMatch = pathname.match(/^\/api\/restaurants\/([a-z0-9-]+)(?:\/(bookings|cancel))?$/);
   const ownerBookingMatch = pathname.match(/^\/api\/owner\/bookings\/([A-Z0-9-]+)$/i);
+  const platformRestaurantMatch = pathname.match(/^\/api\/platform\/restaurants\/([A-Za-z0-9_-]+)$/);
 
   if (request.method === "POST" && pathname === "/api/stripe/webhook") return handleStripeWebhook(request, response);
   if (pathname.startsWith("/api/") && enforceRateLimit(request, response, "api", RATE_LIMIT_RULES.api)) return;
@@ -1720,6 +2005,20 @@ async function route(request, response) {
     if (enforceRateLimit(request, response, "auth", RATE_LIMIT_RULES.auth)) return;
     return handleLogin(request, response);
   }
+  if (request.method === "POST" && pathname === "/api/owner/password-reset/request") {
+    if (enforceRateLimit(request, response, "auth", RATE_LIMIT_RULES.auth)) return;
+    return handlePasswordResetRequest(request, response);
+  }
+  if (request.method === "POST" && pathname === "/api/owner/password-reset/confirm") {
+    if (enforceRateLimit(request, response, "auth", RATE_LIMIT_RULES.auth)) return;
+    return handlePasswordResetConfirm(request, response);
+  }
+  if (request.method === "POST" && pathname === "/api/platform/login") {
+    if (enforceRateLimit(request, response, "auth", RATE_LIMIT_RULES.auth)) return;
+    return handlePlatformLogin(request, response);
+  }
+  if (request.method === "GET" && pathname === "/api/platform/restaurants") return handlePlatformRestaurants(request, response);
+  if (request.method === "PATCH" && platformRestaurantMatch) return handlePlatformRestaurantAction(request, response, platformRestaurantMatch[1]);
   if (request.method === "GET" && pathname === "/api/owner/me") return handleOwnerMe(request, response);
   if (request.method === "PATCH" && pathname === "/api/owner/me") return handleUpdateRestaurant(request, response);
   if (request.method === "POST" && pathname === "/api/owner/change-password") return handleChangePassword(request, response);
@@ -1795,6 +2094,8 @@ async function ensureData() {
       plan: "TenSeat Free",
       priceMonthly: 0,
       currency: "AUD",
+      approvalStatus: "approved",
+      accountStatus: "active",
       subscriptionStatus: "active",
       billingExempt: true,
       billingExemptReason: "Permanent free account",
@@ -1831,6 +2132,14 @@ async function ensureData() {
     }
     if (chirin.subscriptionStatus !== "active") {
       chirin.subscriptionStatus = "active";
+      restaurantsChanged = true;
+    }
+    if (chirin.approvalStatus !== "approved") {
+      chirin.approvalStatus = "approved";
+      restaurantsChanged = true;
+    }
+    if (chirin.accountStatus !== "active") {
+      chirin.accountStatus = "active";
       restaurantsChanged = true;
     }
     if (!chirin.billingExempt) {
@@ -1870,6 +2179,8 @@ async function ensureData() {
       plan: "TenSeat Basic",
       priceMonthly: 10,
       currency: "AUD",
+      approvalStatus: "approved",
+      accountStatus: "active",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
       trialDays: TRIAL_DAYS,
@@ -1944,6 +2255,14 @@ async function ensureData() {
     }
     if (!restaurant.subscriptionStatus) {
       restaurant.subscriptionStatus = "trialing";
+      restaurantsChanged = true;
+    }
+    if (!restaurant.approvalStatus) {
+      restaurant.approvalStatus = "approved";
+      restaurantsChanged = true;
+    }
+    if (!restaurant.accountStatus) {
+      restaurant.accountStatus = restaurant.suspendedAt ? "suspended" : "active";
       restaurantsChanged = true;
     }
     const defaultTrialDays = restaurant.referredByRestaurantId ? REFERRAL_TRIAL_DAYS : TRIAL_DAYS;

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TenSeat Platform</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <section class="access-shell" id="platformAccess" aria-labelledby="platformAccessTitle">
+      <div class="access-panel">
+        <div class="brand-mark" aria-hidden="true">T</div>
+        <p class="eyebrow">TENSEAT ADMIN</p>
+        <h1 id="platformAccessTitle">Platform Dashboard</h1>
+        <form id="platformLoginForm" class="auth-form">
+          <label class="field compact-field">
+            <span>Admin password</span>
+            <input id="platformPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <p class="form-error" id="platformLoginError" role="alert"></p>
+          <button class="primary-button" type="submit">Log in</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="admin-app" id="platformApp" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark small" aria-hidden="true">T</span>
+          <span class="brand-name">TenSeat</span>
+          <span class="brand-section">Platform</span>
+        </div>
+        <button class="quiet-button" id="platformLogoutButton" type="button">Log out</button>
+      </header>
+
+      <div class="dashboard">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">ADMIN</p>
+            <h1>Restaurant Accounts</h1>
+          </div>
+          <button class="quiet-button" id="platformRefreshButton" type="button">Refresh</button>
+        </section>
+
+        <section class="summary-band platform-summary" aria-label="Platform summary">
+          <div class="metric"><span>Total</span><strong id="platformTotal">0</strong></div>
+          <div class="metric"><span>Pending</span><strong id="platformPending">0</strong></div>
+          <div class="metric"><span>Approved</span><strong id="platformApproved">0</strong></div>
+          <div class="metric"><span>Suspended</span><strong id="platformSuspended">0</strong></div>
+          <div class="metric"><span>Accepting bookings</span><strong id="platformAccepting">0</strong></div>
+        </section>
+
+        <section class="bookings-section" aria-labelledby="platformListTitle">
+          <header class="section-header">
+            <div><h2 id="platformListTitle">All Restaurants</h2><p id="platformLastUpdated">Not refreshed yet</p></div>
+            <span class="live-status"><i aria-hidden="true"></i>Admin</span>
+          </header>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Restaurant</th><th>Email</th><th>Approval</th><th>Account</th><th>Plan</th><th>Bookings</th><th>Created</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="platformRows"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="platformEmpty" hidden>
+            <span class="empty-symbol" aria-hidden="true">&#10003;</span>
+            <h3>No restaurants yet</h3>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div class="toast" id="platformToast" role="status" aria-live="polite"></div>
+    <script src="/platform.js"></script>
+  </body>
+</html>

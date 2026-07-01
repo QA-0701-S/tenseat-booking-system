@@ -71,7 +71,8 @@ async function upsertRestaurant(fixture) {
         googleMapsQuery: fixture.googleMapsQuery,
         maxPartySize: fixture.maxPartySize,
         timeSlotCapacity: fixture.timeSlotCapacity,
-        servicePeriods: fixture.servicePeriods
+        servicePeriods: fixture.servicePeriods,
+        termsAccepted: true
       })
     });
   } catch (error) {
@@ -94,7 +95,26 @@ async function upsertRestaurant(fixture) {
       servicePeriods: fixture.servicePeriods
     })
   });
+  if (session.restaurant && session.restaurant.approvalStatus === "pending") {
+    await approveRestaurant(session.restaurant.id);
+  }
   return session;
+}
+
+async function approveRestaurant(restaurantId) {
+  const password = process.env.PLATFORM_ADMIN_PASSWORD || process.env.TENSEAT_ADMIN_PASSWORD || "";
+  if (!password) {
+    throw new Error("Set PLATFORM_ADMIN_PASSWORD before seeding new restaurants, because new accounts require TenSeat approval.");
+  }
+  const platform = await json("/api/platform/login", {
+    method: "POST",
+    body: JSON.stringify({ password: password })
+  });
+  await json("/api/platform/restaurants/" + encodeURIComponent(restaurantId), {
+    method: "PATCH",
+    token: platform.token,
+    body: JSON.stringify({ action: "approve" })
+  });
 }
 
 async function seedBookings(fixture, token) {

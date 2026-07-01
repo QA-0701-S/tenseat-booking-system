@@ -7,6 +7,7 @@ var token = sessionStorage.getItem("tenseatOwnerToken") || "";
 var restaurant = null;
 var loading = false;
 var billingReturnHandled = false;
+var resetToken = new URLSearchParams(window.location.search).get("reset") || "";
 
 var el = {
   accessView: document.getElementById("accessView"),
@@ -14,9 +15,20 @@ var el = {
   registerTab: document.getElementById("registerTab"),
   loginForm: document.getElementById("loginForm"),
   registerForm: document.getElementById("registerForm"),
+  forgotForm: document.getElementById("forgotForm"),
+  resetForm: document.getElementById("resetForm"),
   loginEmail: document.getElementById("loginEmail"),
   loginPassword: document.getElementById("loginPassword"),
   loginError: document.getElementById("loginError"),
+  forgotPassword: document.getElementById("forgotPasswordButton"),
+  forgotEmail: document.getElementById("forgotEmail"),
+  forgotMessage: document.getElementById("forgotMessage"),
+  forgotError: document.getElementById("forgotError"),
+  forgotBack: document.getElementById("forgotBackButton"),
+  resetPassword: document.getElementById("resetPassword"),
+  resetPasswordConfirm: document.getElementById("resetPasswordConfirm"),
+  resetError: document.getElementById("resetError"),
+  resetBack: document.getElementById("resetBackButton"),
   registerName: document.getElementById("registerName"),
   registerEmail: document.getElementById("registerEmail"),
   registerPassword: document.getElementById("registerPassword"),
@@ -32,6 +44,9 @@ var el = {
   bookingsView: document.getElementById("bookingsView"),
   settingsView: document.getElementById("settingsView"),
   securityAlert: document.getElementById("securityAlert"),
+  accountAlert: document.getElementById("accountAlert"),
+  accountAlertTitle: document.getElementById("accountAlertTitle"),
+  accountAlertBody: document.getElementById("accountAlertBody"),
   date: document.getElementById("bookingDate"),
   refresh: document.getElementById("refreshButton"),
   bookingCount: document.getElementById("bookingCount"),
@@ -89,6 +104,11 @@ function init() {
   el.registerTab.addEventListener("click", function () { showAuthMode("register"); });
   el.loginForm.addEventListener("submit", handleLogin);
   el.registerForm.addEventListener("submit", handleRegister);
+  el.forgotForm.addEventListener("submit", handleForgotPassword);
+  el.resetForm.addEventListener("submit", handleResetPassword);
+  el.forgotPassword.addEventListener("click", function () { showAuthMode("forgot"); });
+  el.forgotBack.addEventListener("click", function () { showAuthMode("login"); });
+  el.resetBack.addEventListener("click", function () { showAuthMode("login"); });
   el.logout.addEventListener("click", logout);
   el.bookingsTab.addEventListener("click", function () { showView("bookings"); });
   el.settingsTab.addEventListener("click", function () { showView("settings"); });
@@ -102,20 +122,26 @@ function init() {
   el.subscribePro.addEventListener("click", function () { startStripeCheckout("pro"); });
   el.manageBilling.addEventListener("click", openBillingPortal);
   el.copyReferral.addEventListener("click", copyReferralCode);
-  if (new URLSearchParams(window.location.search).get("mode") === "register") showAuthMode("register");
+  if (resetToken) showAuthMode("reset");
+  else if (new URLSearchParams(window.location.search).get("mode") === "register") showAuthMode("register");
   if (token) restoreSession();
 }
 
 function showAuthMode(mode) {
   var login = mode === "login";
+  var register = mode === "register";
   el.loginForm.hidden = !login;
-  el.registerForm.hidden = login;
+  el.registerForm.hidden = !register;
+  el.forgotForm.hidden = mode !== "forgot";
+  el.resetForm.hidden = mode !== "reset";
   el.loginTab.classList.toggle("active", login);
-  el.registerTab.classList.toggle("active", !login);
+  el.registerTab.classList.toggle("active", register);
   el.loginTab.setAttribute("aria-selected", String(login));
-  el.registerTab.setAttribute("aria-selected", String(!login));
+  el.registerTab.setAttribute("aria-selected", String(register));
   el.loginError.textContent = "";
   el.registerError.textContent = "";
+  el.forgotError.textContent = "";
+  el.resetError.textContent = "";
 }
 
 async function handleLogin(event) {
@@ -149,6 +175,41 @@ async function handleRegister(event) {
     acceptSession(result);
   } catch (error) {
     el.registerError.textContent = error.message;
+  }
+}
+
+async function handleForgotPassword(event) {
+  event.preventDefault();
+  el.forgotError.textContent = "";
+  try {
+    var result = await jsonRequest("/api/owner/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email: el.forgotEmail.value.trim() })
+    }, false);
+    el.forgotMessage.textContent = result.message || "If that email is registered, a reset link will be sent shortly.";
+    el.forgotForm.reset();
+  } catch (error) {
+    el.forgotError.textContent = error.message;
+  }
+}
+
+async function handleResetPassword(event) {
+  event.preventDefault();
+  el.resetError.textContent = "";
+  if (el.resetPassword.value !== el.resetPasswordConfirm.value) {
+    el.resetError.textContent = "Passwords do not match.";
+    return;
+  }
+  try {
+    var result = await jsonRequest("/api/owner/password-reset/confirm", {
+      method: "POST",
+      body: JSON.stringify({ token: resetToken, password: el.resetPassword.value })
+    }, false);
+    acceptSession(result);
+    if (window.history && window.history.replaceState) window.history.replaceState({}, document.title, "/owner");
+    showToast("Password reset. You are logged in.");
+  } catch (error) {
+    el.resetError.textContent = error.message;
   }
 }
 
@@ -212,7 +273,30 @@ function applyRestaurant() {
   el.billingMeta.textContent = billingMetaText();
   applyBillingButtons();
   applyReferralPanel();
+  applyAccountAlert();
   el.securityAlert.hidden = !restaurant.mustChangePassword;
+}
+
+function applyAccountAlert() {
+  if (restaurant.accountStatus === "suspended") {
+    el.accountAlert.hidden = false;
+    el.accountAlertTitle.textContent = "Account suspended";
+    el.accountAlertBody.textContent = restaurant.suspendedReason || "This account is paused by TenSeat. New bookings are disabled.";
+    return;
+  }
+  if (restaurant.approvalStatus === "pending") {
+    el.accountAlert.hidden = false;
+    el.accountAlertTitle.textContent = "Waiting for TenSeat approval";
+    el.accountAlertBody.textContent = "Your booking page is created, but new bookings and billing are paused until TenSeat approves this restaurant.";
+    return;
+  }
+  if (restaurant.approvalStatus === "rejected") {
+    el.accountAlert.hidden = false;
+    el.accountAlertTitle.textContent = "Account not approved";
+    el.accountAlertBody.textContent = "This restaurant account was not approved. New bookings are disabled.";
+    return;
+  }
+  el.accountAlert.hidden = true;
 }
 
 function subscriptionLabel(status) {
@@ -241,6 +325,13 @@ function setOwnerBookingFormDisabled(isDisabled) {
 
 function applyBillingButtons() {
   var billing = restaurant.billing || {};
+  if (restaurant.accountStatus === "suspended" || restaurant.approvalStatus === "pending" || restaurant.approvalStatus === "rejected") {
+    el.subscribeBasic.disabled = true;
+    el.subscribePro.disabled = true;
+    el.manageBilling.disabled = true;
+    el.billingNote.textContent = "Billing is available after TenSeat approves this restaurant account.";
+    return;
+  }
   if (billing.billingExempt) {
     el.subscribeBasic.disabled = true;
     el.subscribePro.disabled = true;

@@ -143,6 +143,29 @@ input:focus-visible {
   font-size: 13px;
 }
 
+.form-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.text-button {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  border: 0;
+  color: var(--green);
+  background: transparent;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .terms-check {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

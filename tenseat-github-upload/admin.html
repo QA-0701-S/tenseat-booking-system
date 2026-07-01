@@ -29,6 +29,7 @@
           </label>
           <p class="form-error" id="loginError" role="alert"></p>
           <button class="primary-button" type="submit">Log in</button>
+          <button class="text-button" id="forgotPasswordButton" type="button">Forgot password?</button>
         </form>
 
         <form id="registerForm" class="auth-form" hidden>
@@ -55,6 +56,31 @@
           <p class="form-error" id="registerError" role="alert"></p>
           <button class="primary-button" type="submit">Create restaurant account</button>
         </form>
+
+        <form id="forgotForm" class="auth-form" hidden>
+          <label class="field compact-field">
+            <span>Login email</span>
+            <input id="forgotEmail" type="email" autocomplete="email" required />
+          </label>
+          <p class="form-note" id="forgotMessage">Enter your restaurant login email. If it is registered, TenSeat will email a reset link.</p>
+          <p class="form-error" id="forgotError" role="alert"></p>
+          <button class="primary-button" type="submit">Send reset link</button>
+          <button class="text-button" id="forgotBackButton" type="button">Back to log in</button>
+        </form>
+
+        <form id="resetForm" class="auth-form" hidden>
+          <label class="field compact-field">
+            <span>New password (8+ characters, letters and numbers)</span>
+            <input id="resetPassword" type="password" minlength="8" autocomplete="new-password" required />
+          </label>
+          <label class="field compact-field">
+            <span>Confirm new password</span>
+            <input id="resetPasswordConfirm" type="password" minlength="8" autocomplete="new-password" required />
+          </label>
+          <p class="form-error" id="resetError" role="alert"></p>
+          <button class="primary-button" type="submit">Reset password</button>
+          <button class="text-button" id="resetBackButton" type="button">Back to log in</button>
+        </form>
       </div>
     </section>
 
@@ -73,6 +99,11 @@
           <button class="view-tab active" id="bookingsTab" type="button">Bookings</button>
           <button class="view-tab" id="settingsTab" type="button">Settings</button>
         </nav>
+
+        <section class="security-alert" id="accountAlert" hidden>
+          <strong id="accountAlertTitle">Account status</strong>
+          <span id="accountAlertBody">This restaurant account needs attention.</span>
+        </section>
 
         <section id="bookingsView">
           <section class="page-heading">
