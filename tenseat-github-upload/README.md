@@ -41,6 +41,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - New restaurants receive a 14-day trial.
 - Restaurants that register with an active paid restaurant referral code receive a 30-day trial.
 - Paid restaurants get their own repeatable referral code and can earn up to 12 months of referral credits.
+- The seeded Chirin account is a permanent free account for internal/founding use.
 - Expired trials and cancelled, unpaid, past-due, or incomplete subscriptions pause new bookings without deleting existing bookings.
 - Booking codes use a short format such as `TS-8K42PA`.
 - Passwords are salted and hashed.
@@ -132,6 +133,7 @@ The seed script creates two test restaurants:
 Test dashboard accounts:
 
 - `restaurant.a@example.com` / `RestaurantA123`
+- `chirin.food191@gmail.com` / `Chirin1919!` (permanent free account)
 - `split.bistro@example.com` / `SplitBistro123`
 
 Create local test data:

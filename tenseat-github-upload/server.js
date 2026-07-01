@@ -273,6 +273,7 @@ function activeBooking(booking) {
 }
 
 function restaurantAcceptsBookings(restaurant) {
+  if (restaurant && restaurant.billingExempt) return true;
   const status = String(restaurant.subscriptionStatus || "trialing");
   if (["canceled", "past_due", "unpaid", "incomplete", "incomplete_expired"].includes(status)) return false;
   if (status === "trialing" && trialExpired(restaurant)) return false;
@@ -295,6 +296,7 @@ function trialEndsAt(baseTime, days) {
 }
 
 function trialExpired(restaurant) {
+  if (restaurant && restaurant.billingExempt) return false;
   if (String(restaurant.subscriptionStatus || "") !== "trialing") return false;
   const endMs = new Date(restaurant.trialEndsAt || 0).getTime();
   return Number.isFinite(endMs) && endMs <= Date.now();
@@ -322,7 +324,7 @@ function makeReferralCode(existingCodes) {
 }
 
 function activePaidRestaurant(restaurant) {
-  return String(restaurant && restaurant.subscriptionStatus || "") === "active";
+  return !restaurant.billingExempt && String(restaurant && restaurant.subscriptionStatus || "") === "active";
 }
 
 function referralCreditMonths(restaurant) {
@@ -419,18 +421,20 @@ function planFromRestaurant(restaurant) {
 }
 
 function hasManageableSubscription(restaurant) {
+  if (restaurant.billingExempt) return false;
   if (!restaurant.stripeSubscriptionId) return false;
   return !["canceled", "incomplete_expired"].includes(String(restaurant.subscriptionStatus || ""));
 }
 
 function ownerRestaurant(restaurant) {
   const plan = planFromRestaurant(restaurant);
+  const billingExempt = Boolean(restaurant.billingExempt);
   return {
     ...publicRestaurant(restaurant),
     id: restaurant.id,
-    plan: restaurant.plan || plan.name,
+    plan: restaurant.plan || (billingExempt ? "TenSeat Free" : plan.name),
     stripePlanKey: plan.key,
-    priceMonthly: Number(restaurant.priceMonthly || plan.priceMonthly),
+    priceMonthly: billingExempt ? 0 : Number(restaurant.priceMonthly || plan.priceMonthly),
     currency: restaurant.currency || plan.currency,
     subscriptionStatus: restaurant.subscriptionStatus,
     stripeCurrentPeriodEnd: restaurant.stripeCurrentPeriodEnd,
@@ -439,9 +443,11 @@ function ownerRestaurant(restaurant) {
     trialDays: trialDaysFor(restaurant),
     billing: {
       stripeConfigured: stripeConfigured(),
+      billingExempt: billingExempt,
+      billingExemptReason: restaurant.billingExemptReason || "",
       hasStripeCustomer: Boolean(restaurant.stripeCustomerId),
       hasStripeSubscription: Boolean(restaurant.stripeSubscriptionId),
-      canManageBilling: stripeConfigured() && Boolean(restaurant.stripeCustomerId),
+      canManageBilling: !billingExempt && stripeConfigured() && Boolean(restaurant.stripeCustomerId),
       plans: publicBillingPlans()
     },
     referral: {
@@ -1292,6 +1298,9 @@ async function handleBillingCheckout(request, response) {
   if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
   const input = await parseBody(request, response);
   if (!input) return;
+  if (restaurant.billingExempt) {
+    return sendJson(response, 409, { ok: false, error: "This restaurant has a permanent free account and does not need Stripe billing." });
+  }
   const plan = planFromKey(input.plan);
   if (!plan) return sendJson(response, 400, { ok: false, error: "Choose a valid plan." });
   if (hasManageableSubscription(restaurant)) {
@@ -1338,6 +1347,7 @@ async function handleBillingCheckout(request, response) {
 async function handleBillingPortal(request, response) {
   const restaurant = await authenticatedRestaurant(request);
   if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  if (restaurant.billingExempt) return sendJson(response, 409, { ok: false, error: "This restaurant has a permanent free account and does not need Stripe billing." });
   const stripe = getStripeClient();
   if (!stripe) return sendJson(response, 503, { ok: false, error: "Stripe is not configured yet." });
   if (!restaurant.stripeCustomerId) return sendJson(response, 400, { ok: false, error: "This restaurant does not have a Stripe customer yet." });
@@ -1772,13 +1782,15 @@ async function ensureData() {
       servicePeriods: [{ openingTime: "11:30", closingTime: "14:30" }],
       maxPartySize: 20,
       timeSlotCapacity: 20,
-      plan: "TenSeat",
-      priceMonthly: 10,
+      plan: "TenSeat Free",
+      priceMonthly: 0,
       currency: "AUD",
-      subscriptionStatus: "trialing",
+      subscriptionStatus: "active",
+      billingExempt: true,
+      billingExemptReason: "Permanent free account",
       mustChangePassword: true,
       trialDays: TRIAL_DAYS,
-      trialEndsAt: trialEndsAt(null, TRIAL_DAYS),
+      trialEndsAt: "",
       createdAt: new Date().toISOString()
     };
     restaurants.push(chirin);
@@ -1793,6 +1805,36 @@ async function ensureData() {
   } else if (typeof chirin.mustChangePassword !== "boolean") {
     chirin.mustChangePassword = false;
     restaurantsChanged = true;
+  }
+  if (chirin) {
+    if (chirin.name !== "Chirin") {
+      chirin.name = "Chirin";
+      restaurantsChanged = true;
+    }
+    if (chirin.plan !== "TenSeat Free") {
+      chirin.plan = "TenSeat Free";
+      restaurantsChanged = true;
+    }
+    if (Number(chirin.priceMonthly) !== 0) {
+      chirin.priceMonthly = 0;
+      restaurantsChanged = true;
+    }
+    if (chirin.subscriptionStatus !== "active") {
+      chirin.subscriptionStatus = "active";
+      restaurantsChanged = true;
+    }
+    if (!chirin.billingExempt) {
+      chirin.billingExempt = true;
+      restaurantsChanged = true;
+    }
+    if (chirin.billingExemptReason !== "Permanent free account") {
+      chirin.billingExemptReason = "Permanent free account";
+      restaurantsChanged = true;
+    }
+    if (chirin.trialEndsAt) {
+      chirin.trialEndsAt = "";
+      restaurantsChanged = true;
+    }
   }
 
   let restaurantA = restaurants.find(function (restaurant) { return restaurant.slug === "restaurant-a"; });
@@ -1861,15 +1903,28 @@ async function ensureData() {
       restaurantsChanged = true;
     }
     const billingPlan = planFromRestaurant(restaurant);
-    if (!restaurant.stripePlanKey) {
+    if (restaurant.billingExempt) {
+      if (restaurant.plan !== "TenSeat Free") {
+        restaurant.plan = "TenSeat Free";
+        restaurantsChanged = true;
+      }
+      if (Number(restaurant.priceMonthly) !== 0) {
+        restaurant.priceMonthly = 0;
+        restaurantsChanged = true;
+      }
+      if (!restaurant.currency) {
+        restaurant.currency = "AUD";
+        restaurantsChanged = true;
+      }
+    } else if (!restaurant.stripePlanKey) {
       restaurant.stripePlanKey = billingPlan.key;
       restaurantsChanged = true;
     }
-    if (!restaurant.plan) {
+    if (!restaurant.billingExempt && !restaurant.plan) {
       restaurant.plan = billingPlan.name;
       restaurantsChanged = true;
     }
-    if (!restaurant.priceMonthly) {
+    if (!restaurant.billingExempt && !restaurant.priceMonthly) {
       restaurant.priceMonthly = billingPlan.priceMonthly;
       restaurantsChanged = true;
     }

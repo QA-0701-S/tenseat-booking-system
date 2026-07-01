@@ -202,8 +202,11 @@ function applyRestaurant() {
   var link = localBookingOrigin() + "/r/" + restaurant.slug;
   el.bookingLink.value = link;
   el.openBookingLink.href = link;
-  el.currentPlanName.textContent = (restaurant.plan || "TenSeat Basic") + " - A$" + Number(restaurant.priceMonthly || 10) + "/month";
-  el.planStatus.textContent = subscriptionLabel(restaurant.subscriptionStatus);
+  var billing = restaurant.billing || {};
+  el.currentPlanName.textContent = billing.billingExempt
+    ? (restaurant.plan || "TenSeat Free") + " - permanent"
+    : (restaurant.plan || "TenSeat Basic") + " - A$" + Number(restaurant.priceMonthly || 10) + "/month";
+  el.planStatus.textContent = billing.billingExempt ? "Free" : subscriptionLabel(restaurant.subscriptionStatus);
   el.billingMeta.textContent = billingMetaText();
   applyBillingButtons();
   applyReferralPanel();
@@ -217,6 +220,7 @@ function subscriptionLabel(status) {
 
 function billingMetaText() {
   var billing = restaurant.billing || {};
+  if (billing.billingExempt) return billing.billingExemptReason || "Permanent free account";
   if (!billing.stripeConfigured) return "Stripe not configured";
   if (restaurant.trialExpired) return "Trial expired - subscribe to continue.";
   if (restaurant.subscriptionStatus === "trialing" && restaurant.trialEndsAt) {
@@ -235,6 +239,15 @@ function setOwnerBookingFormDisabled(isDisabled) {
 
 function applyBillingButtons() {
   var billing = restaurant.billing || {};
+  if (billing.billingExempt) {
+    el.subscribeBasic.disabled = true;
+    el.subscribePro.disabled = true;
+    el.manageBilling.disabled = true;
+    el.subscribeBasic.textContent = "Included";
+    el.subscribePro.textContent = "Not needed";
+    el.billingNote.textContent = "This restaurant has a permanent free account. Stripe billing is not required.";
+    return;
+  }
   var stripeReady = Boolean(billing.stripeConfigured);
   var hasSubscription = Boolean(billing.hasStripeSubscription);
   var currentPlan = restaurant.stripePlanKey || "basic";
