@@ -191,6 +191,7 @@ function applyRestaurant() {
   el.settingsTimeSlotCapacity.value = restaurant.timeSlotCapacity || restaurant.maxPartySize || 20;
   el.ownerPartySize.max = restaurant.maxPartySize;
   el.ownerPartySize.value = Math.min(2, restaurant.maxPartySize || 2);
+  setOwnerBookingFormDisabled(restaurant.acceptingBookings === false);
   var link = localBookingOrigin() + "/r/" + restaurant.slug;
   el.bookingLink.value = link;
   el.openBookingLink.href = link;
@@ -209,9 +210,19 @@ function subscriptionLabel(status) {
 function billingMetaText() {
   var billing = restaurant.billing || {};
   if (!billing.stripeConfigured) return "Stripe not configured";
+  if (restaurant.trialExpired) return "Trial expired - subscribe to continue.";
+  if (restaurant.subscriptionStatus === "trialing" && restaurant.trialEndsAt) {
+    return "Trial ends " + formatDate(restaurant.trialEndsAt.slice(0, 10));
+  }
   if (restaurant.stripeCurrentPeriodEnd) return "Renews " + formatDate(restaurant.stripeCurrentPeriodEnd.slice(0, 10));
   if (billing.hasStripeSubscription) return "Stripe subscription connected";
   return "Ready for Stripe Checkout";
+}
+
+function setOwnerBookingFormDisabled(isDisabled) {
+  Array.prototype.forEach.call(el.ownerBookingForm.elements, function (field) {
+    field.disabled = isDisabled;
+  });
 }
 
 function applyBillingButtons() {
@@ -364,6 +375,9 @@ function statusLabel(status) {
 
 async function createOwnerBooking(event) {
   event.preventDefault();
+  if (restaurant.acceptingBookings === false) {
+    return showToast("New bookings are paused. Subscribe to continue.");
+  }
   try {
     await jsonRequest("/api/owner/bookings", {
       method: "POST",

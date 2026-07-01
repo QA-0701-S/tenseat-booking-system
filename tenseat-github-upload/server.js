@@ -19,6 +19,7 @@ const PUBLIC_ORIGIN = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "")
 const TRUST_PROXY = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || ""));
 const MAX_BODY_BYTES = 64 * 1024;
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const TRIAL_DAYS = numberFromEnv("TRIAL_DAYS", 14);
 const EMAIL_CONNECT_TIMEOUT_MS = numberFromEnv("EMAIL_CONNECT_TIMEOUT_MS", 10000);
 const EMAIL_SOCKET_TIMEOUT_MS = numberFromEnv("EMAIL_SOCKET_TIMEOUT_MS", 15000);
 const EMAIL_SEND_TIMEOUT_MS = numberFromEnv("EMAIL_SEND_TIMEOUT_MS", 20000);
@@ -271,7 +272,21 @@ function activeBooking(booking) {
 
 function restaurantAcceptsBookings(restaurant) {
   const status = String(restaurant.subscriptionStatus || "trialing");
-  return !["canceled", "unpaid", "incomplete", "incomplete_expired"].includes(status);
+  if (["canceled", "past_due", "unpaid", "incomplete", "incomplete_expired"].includes(status)) return false;
+  if (status === "trialing" && trialExpired(restaurant)) return false;
+  return true;
+}
+
+function trialEndsAt(baseTime) {
+  const startMs = baseTime ? new Date(baseTime).getTime() : Date.now();
+  const safeStartMs = Number.isFinite(startMs) ? startMs : Date.now();
+  return new Date(safeStartMs + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function trialExpired(restaurant) {
+  if (String(restaurant.subscriptionStatus || "") !== "trialing") return false;
+  const endMs = new Date(restaurant.trialEndsAt || 0).getTime();
+  return Number.isFinite(endMs) && endMs <= Date.now();
 }
 
 function makeBookingCode(bookings) {
@@ -379,6 +394,9 @@ function ownerRestaurant(restaurant) {
     currency: restaurant.currency || plan.currency,
     subscriptionStatus: restaurant.subscriptionStatus,
     stripeCurrentPeriodEnd: restaurant.stripeCurrentPeriodEnd,
+    acceptingBookings: restaurantAcceptsBookings(restaurant),
+    trialExpired: trialExpired(restaurant),
+    trialDays: TRIAL_DAYS,
     billing: {
       stripeConfigured: stripeConfigured(),
       hasStripeCustomer: Boolean(restaurant.stripeCustomerId),
@@ -966,7 +984,7 @@ async function handleRegister(request, response) {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
-      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      trialEndsAt: trialEndsAt(),
       createdAt: new Date().toISOString()
     };
     restaurants.push(created);
@@ -1300,6 +1318,9 @@ async function handleCancelBooking(request, response, restaurant) {
 async function handleOwnerCreateBooking(request, response) {
   const restaurant = await authenticatedRestaurant(request);
   if (!restaurant) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  if (!restaurantAcceptsBookings(restaurant)) {
+    return sendJson(response, 403, { ok: false, error: "This restaurant is not accepting new bookings right now." });
+  }
   const input = await parseBody(request, response);
   if (!input) return;
   const validationError = validateBooking(input, restaurant);
@@ -1545,7 +1566,7 @@ async function ensureData() {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: true,
-      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      trialEndsAt: trialEndsAt(),
       createdAt: new Date().toISOString()
     };
     restaurants.push(chirin);
@@ -1587,7 +1608,7 @@ async function ensureData() {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
-      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      trialEndsAt: trialEndsAt(),
       createdAt: new Date().toISOString()
     };
     restaurants.push(restaurantA);

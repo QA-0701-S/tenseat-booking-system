@@ -38,7 +38,8 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Stripe Checkout supports Basic and Pro monthly subscriptions from the restaurant dashboard.
 - Stripe webhooks update restaurant subscription status after checkout, updates, and cancellations.
 - Stripe Billing Portal lets subscribed restaurants manage payment methods, invoices, and cancellation.
-- Cancelled, unpaid, or incomplete subscriptions pause new online bookings without deleting existing bookings.
+- New restaurants receive a 14-day trial.
+- Expired trials and cancelled, unpaid, past-due, or incomplete subscriptions pause new bookings without deleting existing bookings.
 - Booking codes use a short format such as `TS-8K42PA`.
 - Passwords are salted and hashed.
 - Basic rate limits are enabled for login, registration, booking, and cancellation endpoints.
@@ -72,6 +73,7 @@ PUBLIC_ORIGIN=https://your-tenseat-domain.example
 SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 TRUST_PROXY=true
 DATA_DIR=/var/data/tenseat
+TRIAL_DAYS=14
 GMAIL_USER=your-gmail-address@gmail.com
 GMAIL_APP_PASSWORD=your-16-character-google-app-password
 EMAIL_FROM_NAME=TenSeat
