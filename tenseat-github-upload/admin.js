@@ -20,6 +20,7 @@ var el = {
   registerName: document.getElementById("registerName"),
   registerEmail: document.getElementById("registerEmail"),
   registerPassword: document.getElementById("registerPassword"),
+  registerReferralCode: document.getElementById("registerReferralCode"),
   registerError: document.getElementById("registerError"),
   app: document.getElementById("adminApp"),
   logout: document.getElementById("logoutButton"),
@@ -56,6 +57,10 @@ var el = {
   subscribePro: document.getElementById("subscribeProButton"),
   manageBilling: document.getElementById("manageBillingButton"),
   billingNote: document.getElementById("billingNote"),
+  referralCodeText: document.getElementById("referralCodeText"),
+  referralCreditText: document.getElementById("referralCreditText"),
+  referralNote: document.getElementById("referralNote"),
+  copyReferral: document.getElementById("copyReferralButton"),
   bookingLink: document.getElementById("bookingLink"),
   copyLink: document.getElementById("copyLinkButton"),
   openBookingLink: document.getElementById("openBookingLink"),
@@ -95,6 +100,7 @@ function init() {
   el.subscribeBasic.addEventListener("click", function () { startStripeCheckout("basic"); });
   el.subscribePro.addEventListener("click", function () { startStripeCheckout("pro"); });
   el.manageBilling.addEventListener("click", openBillingPortal);
+  el.copyReferral.addEventListener("click", copyReferralCode);
   if (new URLSearchParams(window.location.search).get("mode") === "register") showAuthMode("register");
   if (token) restoreSession();
 }
@@ -134,7 +140,8 @@ async function handleRegister(event) {
       body: JSON.stringify({
         name: el.registerName.value.trim(),
         email: el.registerEmail.value.trim(),
-        password: el.registerPassword.value
+        password: el.registerPassword.value,
+        referralCode: el.registerReferralCode.value.trim()
       })
     }, false);
     acceptSession(result);
@@ -199,6 +206,7 @@ function applyRestaurant() {
   el.planStatus.textContent = subscriptionLabel(restaurant.subscriptionStatus);
   el.billingMeta.textContent = billingMetaText();
   applyBillingButtons();
+  applyReferralPanel();
   el.securityAlert.hidden = !restaurant.mustChangePassword;
 }
 
@@ -241,6 +249,19 @@ function applyBillingButtons() {
     el.billingNote.textContent = "Use Manage billing for card updates, invoices, subscription changes, or cancellation.";
   } else {
     el.billingNote.textContent = "Payments are handled securely by Stripe Checkout.";
+  }
+}
+
+function applyReferralPanel() {
+  var referral = restaurant.referral || {};
+  var canShare = Boolean(referral.canShare && referral.code);
+  el.referralCodeText.textContent = canShare ? referral.code : "Available after paid subscription";
+  el.copyReferral.disabled = !canShare;
+  el.referralCreditText.textContent = Number(referral.creditMonths || 0) + " / " + Number(referral.maxCreditMonths || 12) + " months";
+  if (canShare) {
+    el.referralNote.textContent = "New restaurants get " + Number(referral.referredTrialDays || 30) + " days free. Credit is added after their first paid month.";
+  } else {
+    el.referralNote.textContent = "Your referral code activates after your paid subscription starts.";
   }
 }
 
@@ -572,6 +593,19 @@ async function copyBookingLink() {
     window.setTimeout(function () { el.copyLink.textContent = "Copy link"; }, 1600);
   } catch {
     showToast("Could not copy. Please select the link manually.");
+  }
+}
+
+async function copyReferralCode() {
+  var code = restaurant && restaurant.referral && restaurant.referral.canShare ? restaurant.referral.code : "";
+  if (!code) return showToast("Referral code is available after paid subscription.");
+  try {
+    await navigator.clipboard.writeText(code);
+    el.copyReferral.textContent = "Copied";
+    showToast("Referral code copied.");
+    window.setTimeout(function () { el.copyReferral.textContent = "Copy code"; }, 1600);
+  } catch {
+    showToast("Could not copy. Please select the code manually.");
   }
 }
 

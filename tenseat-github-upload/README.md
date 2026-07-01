@@ -39,6 +39,8 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Stripe webhooks update restaurant subscription status after checkout, updates, and cancellations.
 - Stripe Billing Portal lets subscribed restaurants manage payment methods, invoices, and cancellation.
 - New restaurants receive a 14-day trial.
+- Restaurants that register with an active paid restaurant referral code receive a 30-day trial.
+- Paid restaurants get their own repeatable referral code and can earn up to 12 months of referral credits.
 - Expired trials and cancelled, unpaid, past-due, or incomplete subscriptions pause new bookings without deleting existing bookings.
 - Booking codes use a short format such as `TS-8K42PA`.
 - Passwords are salted and hashed.
@@ -74,6 +76,8 @@ SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 TRUST_PROXY=true
 DATA_DIR=/var/data/tenseat
 TRIAL_DAYS=14
+REFERRAL_TRIAL_DAYS=30
+MAX_REFERRAL_CREDITS=12
 GMAIL_USER=your-gmail-address@gmail.com
 GMAIL_APP_PASSWORD=your-16-character-google-app-password
 EMAIL_FROM_NAME=TenSeat
@@ -93,10 +97,20 @@ Gmail sending requires a Google App Password. A normal Gmail login password shou
 2. Use test mode first.
 3. Add `STRIPE_SECRET_KEY` in Render.
 4. In Stripe, create a webhook endpoint for `https://your-domain.com/api/stripe/webhook`.
-5. Subscribe to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, and `customer.subscription.deleted`.
+5. Subscribe to `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.paid`.
 6. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET` in Render.
 7. Optional: create monthly recurring prices for Basic A$10 and Pro A$20, then add their Price IDs to Render.
 8. Redeploy the Render service and test Billing from `/owner`.
+
+## Referral Program
+
+- Normal registration: 14 days free, then A$10/month Basic or A$20/month Pro.
+- Referral code registration: 30 days free, then the selected monthly plan.
+- Each paid restaurant has one referral code that can be shared with multiple new restaurants.
+- A new restaurant can use one referral code during account registration only.
+- After the referred restaurant completes its first paid month, the referring restaurant receives 1 month of credit.
+- Referral credits are capped at 12 months per restaurant.
+- Referral rewards cannot be withdrawn as cash or transferred to another restaurant.
 
 ## Render Steps
 

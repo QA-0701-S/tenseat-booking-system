@@ -20,6 +20,8 @@ const TRUST_PROXY = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || "")
 const MAX_BODY_BYTES = 64 * 1024;
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const TRIAL_DAYS = numberFromEnv("TRIAL_DAYS", 14);
+const REFERRAL_TRIAL_DAYS = numberFromEnv("REFERRAL_TRIAL_DAYS", 30);
+const MAX_REFERRAL_CREDITS = numberFromEnv("MAX_REFERRAL_CREDITS", 12);
 const EMAIL_CONNECT_TIMEOUT_MS = numberFromEnv("EMAIL_CONNECT_TIMEOUT_MS", 10000);
 const EMAIL_SOCKET_TIMEOUT_MS = numberFromEnv("EMAIL_SOCKET_TIMEOUT_MS", 15000);
 const EMAIL_SEND_TIMEOUT_MS = numberFromEnv("EMAIL_SEND_TIMEOUT_MS", 20000);
@@ -277,16 +279,54 @@ function restaurantAcceptsBookings(restaurant) {
   return true;
 }
 
-function trialEndsAt(baseTime) {
+function positiveNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function trialDaysFor(restaurant) {
+  return positiveNumber(restaurant && restaurant.trialDays, TRIAL_DAYS);
+}
+
+function trialEndsAt(baseTime, days) {
   const startMs = baseTime ? new Date(baseTime).getTime() : Date.now();
   const safeStartMs = Number.isFinite(startMs) ? startMs : Date.now();
-  return new Date(safeStartMs + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  return new Date(safeStartMs + positiveNumber(days, TRIAL_DAYS) * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function trialExpired(restaurant) {
   if (String(restaurant.subscriptionStatus || "") !== "trialing") return false;
   const endMs = new Date(restaurant.trialEndsAt || 0).getTime();
   return Number.isFinite(endMs) && endMs <= Date.now();
+}
+
+function normalizeReferralCode(value) {
+  const compact = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!compact) return "";
+  if (/^REF[A-Z0-9]{6}$/.test(compact)) return "REF-" + compact.slice(3);
+  if (/^[A-Z0-9]{6}$/.test(compact)) return "REF-" + compact;
+  return String(value || "").trim().toUpperCase();
+}
+
+function validReferralCode(value) {
+  return /^REF-[A-Z0-9]{6}$/.test(String(value || ""));
+}
+
+function makeReferralCode(existingCodes) {
+  const existing = existingCodes instanceof Set ? existingCodes : new Set();
+  let code = "";
+  do {
+    code = "REF-" + crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
+  } while (existing.has(code));
+  return code;
+}
+
+function activePaidRestaurant(restaurant) {
+  return String(restaurant && restaurant.subscriptionStatus || "") === "active";
+}
+
+function referralCreditMonths(restaurant) {
+  return Math.min(MAX_REFERRAL_CREDITS, Math.max(0, Number(restaurant && restaurant.referralCreditMonths) || 0));
 }
 
 function makeBookingCode(bookings) {
@@ -396,13 +436,24 @@ function ownerRestaurant(restaurant) {
     stripeCurrentPeriodEnd: restaurant.stripeCurrentPeriodEnd,
     acceptingBookings: restaurantAcceptsBookings(restaurant),
     trialExpired: trialExpired(restaurant),
-    trialDays: TRIAL_DAYS,
+    trialDays: trialDaysFor(restaurant),
     billing: {
       stripeConfigured: stripeConfigured(),
       hasStripeCustomer: Boolean(restaurant.stripeCustomerId),
       hasStripeSubscription: Boolean(restaurant.stripeSubscriptionId),
       canManageBilling: stripeConfigured() && Boolean(restaurant.stripeCustomerId),
       plans: publicBillingPlans()
+    },
+    referral: {
+      code: restaurant.referralCode || "",
+      canShare: activePaidRestaurant(restaurant),
+      standardTrialDays: TRIAL_DAYS,
+      referredTrialDays: REFERRAL_TRIAL_DAYS,
+      creditMonths: referralCreditMonths(restaurant),
+      maxCreditMonths: MAX_REFERRAL_CREDITS,
+      pendingCount: Array.isArray(restaurant.referralRewards)
+        ? restaurant.referralRewards.filter(function (reward) { return reward.status === "pending"; }).length
+        : 0
     },
     timeSlotCapacity: restaurant.timeSlotCapacity || Math.max(restaurant.maxPartySize || 1, 20),
     trialEndsAt: restaurant.trialEndsAt,
@@ -931,11 +982,134 @@ async function applySubscriptionBilling(subscription, forcedStatus) {
   return updated;
 }
 
+function invoiceSubscriptionId(invoice) {
+  return stripeObjectId(invoice && invoice.subscription) ||
+    stripeObjectId(invoice && invoice.subscription_details && invoice.subscription_details.subscription) ||
+    stripeObjectId(invoice && invoice.parent && invoice.parent.subscription_details && invoice.parent.subscription_details.subscription);
+}
+
+function invoicePaidCountsForReferral(invoice) {
+  if (!invoice) return false;
+  const billingReason = String(invoice.billing_reason || "");
+  if (billingReason && billingReason !== "subscription_cycle") return false;
+  const amountPaid = Number(invoice.amount_paid || 0);
+  return Number.isFinite(amountPaid) && amountPaid > 0;
+}
+
+async function referralRewardCandidateFromInvoice(invoice) {
+  const invoiceId = stripeObjectId(invoice);
+  if (!invoiceId || !invoicePaidCountsForReferral(invoice)) return null;
+  const subscriptionId = invoiceSubscriptionId(invoice);
+  const customerId = stripeObjectId(invoice.customer);
+  if (!subscriptionId && !customerId) return null;
+  const restaurants = await readArray(RESTAURANTS_FILE);
+  const referred = restaurants.find(function (candidate) {
+    return (subscriptionId && candidate.stripeSubscriptionId === subscriptionId) ||
+      (customerId && candidate.stripeCustomerId === customerId);
+  });
+  if (!referred || !referred.referredByRestaurantId) return null;
+  if (["granted", "capped"].includes(String(referred.referralRewardStatus || "")) || referred.referralRewardProcessedAt) return null;
+  const referrer = restaurants.find(function (candidate) { return candidate.id === referred.referredByRestaurantId; });
+  if (!referrer) return null;
+  const plan = planFromRestaurant(referrer);
+  return {
+    invoiceId: invoiceId,
+    referredRestaurantId: referred.id,
+    referredRestaurantName: referred.name,
+    referrerRestaurantId: referrer.id,
+    referrerStripeCustomerId: referrer.stripeCustomerId || "",
+    creditAmount: plan.unitAmount,
+    currency: String(referrer.currency || plan.currency || "AUD").toLowerCase(),
+    capReached: referralCreditMonths(referrer) >= MAX_REFERRAL_CREDITS
+  };
+}
+
+async function createStripeReferralCredit(candidate) {
+  const stripe = getStripeClient();
+  if (!stripe || !candidate.referrerStripeCustomerId || candidate.capReached) {
+    return { status: candidate.capReached ? "capped" : "pending_stripe_customer", transactionId: "" };
+  }
+  const transaction = await stripe.customers.createBalanceTransaction(candidate.referrerStripeCustomerId, {
+    amount: -candidate.creditAmount,
+    currency: candidate.currency,
+    description: "TenSeat referral credit: 1 free month",
+    metadata: {
+      referrerRestaurantId: candidate.referrerRestaurantId,
+      referredRestaurantId: candidate.referredRestaurantId,
+      invoiceId: candidate.invoiceId
+    }
+  }, {
+    idempotencyKey: "tenseat-referral-" + candidate.referredRestaurantId + "-" + candidate.invoiceId
+  });
+  return { status: "applied", transactionId: stripeObjectId(transaction) };
+}
+
+async function persistReferralReward(candidate, stripeCredit) {
+  let result = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const restaurants = await readArray(RESTAURANTS_FILE);
+    const referred = restaurants.find(function (restaurant) { return restaurant.id === candidate.referredRestaurantId; });
+    const referrer = restaurants.find(function (restaurant) { return restaurant.id === candidate.referrerRestaurantId; });
+    if (!referred || !referrer) return;
+    if (["granted", "capped"].includes(String(referred.referralRewardStatus || "")) || referred.referralRewardProcessedAt) return;
+    const now = new Date().toISOString();
+    const capped = candidate.capReached || referralCreditMonths(referrer) >= MAX_REFERRAL_CREDITS;
+    if (!Array.isArray(referrer.referralRewards)) referrer.referralRewards = [];
+    if (capped) {
+      referred.referralRewardStatus = "capped";
+      referred.referralRewardProcessedAt = now;
+      referred.referralRewardInvoiceId = candidate.invoiceId;
+      referrer.referralRewards.push({
+        id: crypto.randomUUID(),
+        status: "capped",
+        referredRestaurantId: referred.id,
+        referredRestaurantName: referred.name,
+        invoiceId: candidate.invoiceId,
+        months: 0,
+        createdAt: now
+      });
+      result = { status: "capped" };
+    } else {
+      referrer.referralCreditMonths = Math.min(MAX_REFERRAL_CREDITS, referralCreditMonths(referrer) + 1);
+      referrer.referralRewards.push({
+        id: crypto.randomUUID(),
+        status: "granted",
+        referredRestaurantId: referred.id,
+        referredRestaurantName: referred.name,
+        invoiceId: candidate.invoiceId,
+        months: 1,
+        amount: candidate.creditAmount,
+        currency: candidate.currency.toUpperCase(),
+        stripeCreditStatus: stripeCredit.status,
+        stripeCreditTransactionId: stripeCredit.transactionId || "",
+        createdAt: now
+      });
+      referred.referralRewardStatus = "granted";
+      referred.referralRewardProcessedAt = now;
+      referred.referralRewardInvoiceId = candidate.invoiceId;
+      result = { status: "granted", stripeCredit: stripeCredit };
+    }
+    referrer.updatedAt = now;
+    referred.updatedAt = now;
+    await writeArray(RESTAURANTS_FILE, restaurants);
+  });
+  await dataWriteQueue;
+  return result;
+}
+
+async function applyReferralRewardForInvoice(invoice) {
+  const candidate = await referralRewardCandidateFromInvoice(invoice);
+  if (!candidate) return null;
+  const stripeCredit = await createStripeReferralCredit(candidate);
+  return persistReferralReward(candidate, stripeCredit);
+}
+
 async function handleRegister(request, response) {
   const input = await parseBody(request, response);
   if (!input) return;
   const email = normalizeEmail(input.email);
   const password = String(input.password || "");
+  const requestedReferralCode = normalizeReferralCode(input.referralCode);
   const settings = {
     name: String(input.name || "").trim(),
     servicePeriods: servicePeriodsFromInput(input, true),
@@ -951,11 +1125,34 @@ async function handleRegister(request, response) {
   const passwordFields = await passwordRecord(password);
   let created;
   let conflict = "";
+  let referralError = "";
   dataWriteQueue = dataWriteQueue.then(async function () {
     const restaurants = await readArray(RESTAURANTS_FILE);
     if (restaurants.some(function (restaurant) { return restaurant.ownerEmail === email; })) {
       conflict = "This email is already registered.";
       return;
+    }
+    let referrer = null;
+    if (requestedReferralCode) {
+      if (!validReferralCode(requestedReferralCode)) {
+        referralError = "Enter a valid referral code.";
+        return;
+      }
+      referrer = restaurants.find(function (restaurant) {
+        return normalizeReferralCode(restaurant.referralCode) === requestedReferralCode;
+      });
+      if (!referrer) {
+        referralError = "Referral code was not found.";
+        return;
+      }
+      if (normalizeEmail(referrer.ownerEmail) === email) {
+        referralError = "You cannot use your own referral code.";
+        return;
+      }
+      if (!activePaidRestaurant(referrer)) {
+        referralError = "This referral code becomes active after the referring restaurant starts a paid subscription.";
+        return;
+      }
     }
     const baseSlug = makeSlug(settings.name);
     let slug = baseSlug;
@@ -964,6 +1161,10 @@ async function handleRegister(request, response) {
       slug = baseSlug + "-" + suffix;
       suffix += 1;
     }
+    const existingReferralCodes = new Set(restaurants.map(function (restaurant) {
+      return normalizeReferralCode(restaurant.referralCode);
+    }).filter(validReferralCode));
+    const appliedTrialDays = referrer ? REFERRAL_TRIAL_DAYS : TRIAL_DAYS;
     created = {
       id: crypto.randomUUID(),
       slug: slug,
@@ -984,7 +1185,14 @@ async function handleRegister(request, response) {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
-      trialEndsAt: trialEndsAt(),
+      trialDays: appliedTrialDays,
+      trialEndsAt: trialEndsAt(null, appliedTrialDays),
+      referralCode: makeReferralCode(existingReferralCodes),
+      referredByRestaurantId: referrer ? referrer.id : "",
+      referralCodeUsed: referrer ? referrer.referralCode : "",
+      referralRewardStatus: referrer ? "pending" : "",
+      referralCreditMonths: 0,
+      referralRewards: [],
       createdAt: new Date().toISOString()
     };
     restaurants.push(created);
@@ -992,6 +1200,7 @@ async function handleRegister(request, response) {
   });
   await dataWriteQueue;
   if (conflict) return sendJson(response, 409, { ok: false, error: conflict });
+  if (referralError) return sendJson(response, 400, { ok: false, error: referralError });
   sendJson(response, 201, { ok: true, token: issueToken(created.id), restaurant: ownerRestaurant(created) });
 }
 
@@ -1192,6 +1401,8 @@ async function handleStripeWebhook(request, response) {
       await applySubscriptionBilling(event.data.object);
     } else if (event.type === "customer.subscription.deleted") {
       await applySubscriptionBilling(event.data.object, "canceled");
+    } else if (event.type === "invoice.paid" || event.type === "invoice.payment_succeeded") {
+      await applyReferralRewardForInvoice(event.data.object);
     }
   } catch (error) {
     console.error("Stripe webhook processing failed:", error.message);
@@ -1566,7 +1777,8 @@ async function ensureData() {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: true,
-      trialEndsAt: trialEndsAt(),
+      trialDays: TRIAL_DAYS,
+      trialEndsAt: trialEndsAt(null, TRIAL_DAYS),
       createdAt: new Date().toISOString()
     };
     restaurants.push(chirin);
@@ -1608,14 +1820,28 @@ async function ensureData() {
       currency: "AUD",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
-      trialEndsAt: trialEndsAt(),
+      trialDays: TRIAL_DAYS,
+      trialEndsAt: trialEndsAt(null, TRIAL_DAYS),
       createdAt: new Date().toISOString()
     };
     restaurants.push(restaurantA);
     restaurantsChanged = true;
   }
 
+  const usedReferralCodes = new Set();
   restaurants.forEach(function (restaurant) {
+    const normalizedReferralCode = normalizeReferralCode(restaurant.referralCode);
+    if (validReferralCode(normalizedReferralCode) && !usedReferralCodes.has(normalizedReferralCode)) {
+      if (restaurant.referralCode !== normalizedReferralCode) {
+        restaurant.referralCode = normalizedReferralCode;
+        restaurantsChanged = true;
+      }
+      usedReferralCodes.add(normalizedReferralCode);
+    } else {
+      restaurant.referralCode = makeReferralCode(usedReferralCodes);
+      usedReferralCodes.add(restaurant.referralCode);
+      restaurantsChanged = true;
+    }
     const periods = servicePeriodsFor(restaurant);
     if (!Array.isArray(restaurant.servicePeriods) || !restaurant.servicePeriods.length) {
       restaurant.servicePeriods = periods;
@@ -1653,6 +1879,25 @@ async function ensureData() {
     }
     if (!restaurant.subscriptionStatus) {
       restaurant.subscriptionStatus = "trialing";
+      restaurantsChanged = true;
+    }
+    const defaultTrialDays = restaurant.referredByRestaurantId ? REFERRAL_TRIAL_DAYS : TRIAL_DAYS;
+    const normalizedTrialDays = positiveNumber(restaurant.trialDays, defaultTrialDays);
+    if (restaurant.trialDays !== normalizedTrialDays) {
+      restaurant.trialDays = normalizedTrialDays;
+      restaurantsChanged = true;
+    }
+    if (String(restaurant.subscriptionStatus || "") === "trialing" && !restaurant.trialEndsAt) {
+      restaurant.trialEndsAt = trialEndsAt(restaurant.createdAt, restaurant.trialDays);
+      restaurantsChanged = true;
+    }
+    const normalizedCredits = referralCreditMonths(restaurant);
+    if (restaurant.referralCreditMonths !== normalizedCredits) {
+      restaurant.referralCreditMonths = normalizedCredits;
+      restaurantsChanged = true;
+    }
+    if (!Array.isArray(restaurant.referralRewards)) {
+      restaurant.referralRewards = [];
       restaurantsChanged = true;
     }
   });

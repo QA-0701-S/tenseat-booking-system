@@ -44,6 +44,10 @@
             <span>Password (8+ characters, letters and numbers)</span>
             <input id="registerPassword" type="password" minlength="8" autocomplete="new-password" required />
           </label>
+          <label class="field compact-field">
+            <span>Referral code (optional)</span>
+            <input id="registerReferralCode" type="text" maxlength="16" autocomplete="off" placeholder="REF-ABC123" />
+          </label>
           <p class="form-error" id="registerError" role="alert"></p>
           <button class="primary-button" type="submit">Create restaurant account</button>
         </form>
@@ -160,6 +164,22 @@
                 <button class="quiet-button" id="manageBillingButton" type="button">Manage billing</button>
                 <p id="billingNote">Stripe checkout is available after Stripe keys are configured.</p>
               </div>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <header><h2>Referral program</h2></header>
+            <div class="referral-panel">
+              <article class="referral-card">
+                <span>Your referral code</span>
+                <strong id="referralCodeText">Available after paid subscription</strong>
+                <button class="quiet-button" id="copyReferralButton" type="button">Copy code</button>
+              </article>
+              <article class="referral-card">
+                <span>Referral credits</span>
+                <strong id="referralCreditText">0 / 12 months</strong>
+                <p id="referralNote">Referral credits are added after the referred restaurant completes its first paid month.</p>
+              </article>
             </div>
           </section>
 

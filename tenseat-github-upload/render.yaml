@@ -21,6 +21,10 @@ services:
         generateValue: true
       - key: PUBLIC_ORIGIN
         sync: false
+      - key: REFERRAL_TRIAL_DAYS
+        value: 30
+      - key: MAX_REFERRAL_CREDITS
+        value: 12
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
