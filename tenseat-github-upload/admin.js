@@ -21,6 +21,7 @@ var el = {
   registerEmail: document.getElementById("registerEmail"),
   registerPassword: document.getElementById("registerPassword"),
   registerReferralCode: document.getElementById("registerReferralCode"),
+  registerTerms: document.getElementById("registerTerms"),
   registerError: document.getElementById("registerError"),
   app: document.getElementById("adminApp"),
   logout: document.getElementById("logoutButton"),
@@ -141,7 +142,8 @@ async function handleRegister(event) {
         name: el.registerName.value.trim(),
         email: el.registerEmail.value.trim(),
         password: el.registerPassword.value,
-        referralCode: el.registerReferralCode.value.trim()
+        referralCode: el.registerReferralCode.value.trim(),
+        termsAccepted: el.registerTerms.checked
       })
     }, false);
     acceptSession(result);

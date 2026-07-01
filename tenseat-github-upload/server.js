@@ -22,6 +22,7 @@ const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const TRIAL_DAYS = numberFromEnv("TRIAL_DAYS", 14);
 const REFERRAL_TRIAL_DAYS = numberFromEnv("REFERRAL_TRIAL_DAYS", 30);
 const MAX_REFERRAL_CREDITS = numberFromEnv("MAX_REFERRAL_CREDITS", 12);
+const LEGAL_VERSION = "2026-07-01";
 const EMAIL_CONNECT_TIMEOUT_MS = numberFromEnv("EMAIL_CONNECT_TIMEOUT_MS", 10000);
 const EMAIL_SOCKET_TIMEOUT_MS = numberFromEnv("EMAIL_SOCKET_TIMEOUT_MS", 15000);
 const EMAIL_SEND_TIMEOUT_MS = numberFromEnv("EMAIL_SEND_TIMEOUT_MS", 20000);
@@ -36,6 +37,10 @@ const PUBLIC_FILES = new Map([
   ["/", ["home.html", "text/html; charset=utf-8"]],
   ["/home.html", ["home.html", "text/html; charset=utf-8"]],
   ["/home.css", ["home.css", "text/css; charset=utf-8"]],
+  ["/privacy", ["privacy.html", "text/html; charset=utf-8"]],
+  ["/privacy.html", ["privacy.html", "text/html; charset=utf-8"]],
+  ["/terms", ["terms.html", "text/html; charset=utf-8"]],
+  ["/terms.html", ["terms.html", "text/html; charset=utf-8"]],
   ["/index.html", ["index.html", "text/html; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
@@ -1116,6 +1121,9 @@ async function handleRegister(request, response) {
   const email = normalizeEmail(input.email);
   const password = String(input.password || "");
   const requestedReferralCode = normalizeReferralCode(input.referralCode);
+  if (input.termsAccepted !== true) {
+    return sendJson(response, 400, { ok: false, error: "Please accept the Terms and Privacy Policy to create an account." });
+  }
   const settings = {
     name: String(input.name || "").trim(),
     servicePeriods: servicePeriodsFromInput(input, true),
@@ -1199,6 +1207,8 @@ async function handleRegister(request, response) {
       referralRewardStatus: referrer ? "pending" : "",
       referralCreditMonths: 0,
       referralRewards: [],
+      termsAcceptedAt: new Date().toISOString(),
+      termsVersion: LEGAL_VERSION,
       createdAt: new Date().toISOString()
     };
     restaurants.push(created);

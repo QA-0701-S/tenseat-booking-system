@@ -24,6 +24,8 @@ The dashboard warns the owner to change this default password. Before real use, 
 
 - Each restaurant can register, log in, and get its own booking link.
 - The root homepage introduces TenSeat and links restaurants to the dashboard login.
+- Public Terms and Privacy Policy pages are available from the homepage footer and registration flow.
+- New restaurant registration requires agreement to the Terms and Privacy Policy.
 - Guests choose date, last name, first name, required phone number, party size, notes, and a 24-hour time inside the restaurant service periods.
 - Restaurants can set one or two service periods, such as lunch `11:30-14:30` and dinner `17:00-21:00`.
 - Each restaurant booking page updates the Google Maps embed from the dashboard address or Google Maps search text.
@@ -56,7 +58,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Use HTTPS in production and set `PUBLIC_ORIGIN` to the real website URL.
 - Keep `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` private. Never commit live Stripe keys.
 - JSON file storage is acceptable for an MVP, but a paid multi-customer version should move to Postgres, Supabase, or another managed database with backups and persistent storage.
-- Add Privacy Policy, Terms, and subscription/cancellation terms before charging restaurants.
+- The included Privacy Policy and Terms are product-ready templates, but should be reviewed for the final business entity before charging restaurants.
 
 ## Deployment
 
