@@ -520,6 +520,8 @@ function platformRestaurant(restaurant) {
     suspendedReason: restaurant.suspendedReason || "",
     billingExempt: Boolean(restaurant.billingExempt),
     acceptingBookings: restaurantAcceptsBookings(restaurant),
+    duplicateMatches: Array.isArray(restaurant.duplicateMatches) ? restaurant.duplicateMatches : [],
+    duplicateAlertLastAt: restaurant.duplicateAlertLastAt || "",
     createdAt: restaurant.createdAt || "",
     approvedAt: restaurant.approvedAt || "",
     suspendedAt: restaurant.suspendedAt || "",
@@ -557,6 +559,10 @@ function duplicateAlertSignature(restaurant, matches) {
       return match.id + ":" + match.fields.slice().sort().join("+");
     }).sort().join("|")
   ].join("::");
+}
+
+function sameJsonValue(left, right) {
+  return JSON.stringify(left || []) === JSON.stringify(right || []);
 }
 
 async function readArray(file) {
@@ -1601,6 +1607,7 @@ async function handleRegister(request, response) {
       referralRewardStatus: referrer ? "pending" : "",
       referralCreditMonths: 0,
       referralRewards: [],
+      duplicateMatches: duplicateMatches,
       duplicateAlertSignature: duplicateMatches.length ? duplicateAlertSignature({
         name: settings.name,
         address: registrationAddress
@@ -1683,11 +1690,15 @@ async function handleUpdateRestaurant(request, response) {
     duplicateMatches = duplicateRestaurantMatches(restaurants, restaurant, restaurant.id);
     const signature = duplicateMatches.length ? duplicateAlertSignature(restaurant, duplicateMatches) : "";
     shouldSendDuplicateAlert = Boolean(signature && signature !== restaurant.duplicateAlertSignature);
+    if (!sameJsonValue(restaurant.duplicateMatches, duplicateMatches)) {
+      restaurant.duplicateMatches = duplicateMatches;
+    }
     if (shouldSendDuplicateAlert) {
       restaurant.duplicateAlertSignature = signature;
       restaurant.duplicateAlertLastAt = new Date().toISOString();
     } else if (!signature && restaurant.duplicateAlertSignature) {
       restaurant.duplicateAlertSignature = "";
+      restaurant.duplicateAlertLastAt = "";
     }
     restaurant.updatedAt = new Date().toISOString();
     updated = restaurant;
@@ -2415,6 +2426,20 @@ async function ensureData() {
     }
     if (!restaurant.accountStatus) {
       restaurant.accountStatus = restaurant.suspendedAt ? "suspended" : "active";
+      restaurantsChanged = true;
+    }
+    const currentDuplicateMatches = duplicateRestaurantMatches(restaurants, restaurant, restaurant.id);
+    if (!sameJsonValue(restaurant.duplicateMatches, currentDuplicateMatches)) {
+      restaurant.duplicateMatches = currentDuplicateMatches;
+      restaurantsChanged = true;
+    }
+    const currentDuplicateSignature = currentDuplicateMatches.length ? duplicateAlertSignature(restaurant, currentDuplicateMatches) : "";
+    if (!currentDuplicateSignature && restaurant.duplicateAlertSignature) {
+      restaurant.duplicateAlertSignature = "";
+      restaurant.duplicateAlertLastAt = "";
+      restaurantsChanged = true;
+    } else if (currentDuplicateSignature && !restaurant.duplicateAlertSignature) {
+      restaurant.duplicateAlertSignature = currentDuplicateSignature;
       restaurantsChanged = true;
     }
     const defaultTrialDays = restaurant.referredByRestaurantId ? REFERRAL_TRIAL_DAYS : TRIAL_DAYS;

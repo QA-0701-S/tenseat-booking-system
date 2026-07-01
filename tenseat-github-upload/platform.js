@@ -12,6 +12,7 @@ var el = {
   logout: document.getElementById("platformLogoutButton"),
   refresh: document.getElementById("platformRefreshButton"),
   total: document.getElementById("platformTotal"),
+  duplicates: document.getElementById("platformDuplicates"),
   suspended: document.getElementById("platformSuspended"),
   accepting: document.getElementById("platformAccepting"),
   rows: document.getElementById("platformRows"),
@@ -76,6 +77,7 @@ function renderRestaurants() {
   el.rows.textContent = "";
   el.empty.hidden = restaurants.length > 0;
   el.total.textContent = restaurants.length;
+  el.duplicates.textContent = restaurants.filter(function (restaurant) { return hasDuplicates(restaurant); }).length;
   el.suspended.textContent = restaurants.filter(function (restaurant) { return restaurant.accountStatus === "suspended"; }).length;
   el.accepting.textContent = restaurants.filter(function (restaurant) { return restaurant.acceptingBookings; }).length;
   el.lastUpdated.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -85,6 +87,7 @@ function renderRestaurants() {
     row.appendChild(cell(restaurant.name + "\n/r/" + restaurant.slug, "guest-name", "Restaurant"));
     row.appendChild(cell(restaurant.ownerEmail, "booking-email", "Email"));
     row.appendChild(cell(label(restaurant.accountStatus), "booking-status " + statusTone(restaurant.accountStatus), "Account"));
+    row.appendChild(duplicateCell(restaurant));
     row.appendChild(cell(planText(restaurant), "", "Plan"));
     row.appendChild(cell(restaurant.acceptingBookings ? "Open" : "Paused", "", "Bookings"));
     row.appendChild(cell(formatDate(restaurant.createdAt), "received-time", "Created"));
@@ -118,6 +121,34 @@ function actionsCell(restaurant) {
     actions.appendChild(actionButton("Restore", "restore", function () { updateRestaurant(restaurant.id, "restore"); }));
   }
   td.appendChild(actions);
+  return td;
+}
+
+function hasDuplicates(restaurant) {
+  return Array.isArray(restaurant.duplicateMatches) && restaurant.duplicateMatches.length > 0;
+}
+
+function duplicateCell(restaurant) {
+  var td = document.createElement("td");
+  td.dataset.label = "Duplicate";
+  if (!hasDuplicates(restaurant)) {
+    var clear = document.createElement("span");
+    clear.className = "booking-status confirmed";
+    clear.textContent = "Clear";
+    td.appendChild(clear);
+    return td;
+  }
+  var wrap = document.createElement("div");
+  wrap.className = "duplicate-warning";
+  var badge = document.createElement("span");
+  badge.className = "booking-status no_show";
+  badge.textContent = restaurant.duplicateMatches.length + " possible";
+  var detail = document.createElement("small");
+  detail.textContent = restaurant.duplicateMatches.map(function (match) {
+    return match.name + " (" + match.fields.join(", ") + ")";
+  }).join("; ");
+  wrap.append(badge, detail);
+  td.appendChild(wrap);
   return td;
 }
 

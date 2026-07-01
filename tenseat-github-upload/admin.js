@@ -8,6 +8,7 @@ var restaurant = null;
 var loading = false;
 var billingReturnHandled = false;
 var resetToken = new URLSearchParams(window.location.search).get("reset") || "";
+var currentBookingsResult = null;
 
 var el = {
   accessView: document.getElementById("accessView"),
@@ -50,6 +51,7 @@ var el = {
   accountAlertBody: document.getElementById("accountAlertBody"),
   date: document.getElementById("bookingDate"),
   refresh: document.getElementById("refreshButton"),
+  exportBookings: document.getElementById("exportBookingsButton"),
   bookingCount: document.getElementById("bookingCount"),
   guestCount: document.getElementById("guestCount"),
   cancelledCount: document.getElementById("cancelledCount"),
@@ -115,6 +117,7 @@ function init() {
   el.settingsTab.addEventListener("click", function () { showView("settings"); });
   el.date.addEventListener("change", loadBookings);
   el.refresh.addEventListener("click", loadBookings);
+  el.exportBookings.addEventListener("click", exportBookingsCsv);
   el.ownerBookingForm.addEventListener("submit", createOwnerBooking);
   el.copyLink.addEventListener("click", copyBookingLink);
   el.settingsForm.addEventListener("submit", saveSettings);
@@ -400,6 +403,7 @@ async function loadBookings() {
 }
 
 function renderBookings(result) {
+  currentBookingsResult = result;
   el.bookingCount.textContent = result.summary.bookingCount;
   el.guestCount.textContent = result.summary.guestCount;
   el.cancelledCount.textContent = result.summary.cancelledCount;
@@ -438,6 +442,65 @@ function renderBookings(result) {
     row.appendChild(actionsCell);
     el.rows.appendChild(row);
   });
+}
+
+function csvEscape(value) {
+  var text = String(value == null ? "" : value);
+  if (/[",\r\n]/.test(text)) return "\"" + text.replace(/"/g, "\"\"") + "\"";
+  return text;
+}
+
+function downloadTextFile(filename, content, type) {
+  var blob = new Blob([content], { type: type || "text/plain;charset=utf-8" });
+  var url = URL.createObjectURL(blob);
+  var link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+function exportBookingsCsv() {
+  if (!currentBookingsResult || !Array.isArray(currentBookingsResult.bookings)) {
+    showToast("Load bookings before exporting.");
+    return;
+  }
+  var rows = [[
+    "Date",
+    "Time",
+    "Last name",
+    "First name",
+    "Phone",
+    "Email",
+    "Party size",
+    "Status",
+    "Notes",
+    "Booking code",
+    "Received"
+  ]];
+  currentBookingsResult.bookings.forEach(function (booking) {
+    rows.push([
+      currentBookingsResult.date,
+      booking.time,
+      bookingLastName(booking),
+      bookingFirstName(booking),
+      booking.phone || "",
+      booking.email || "",
+      booking.partySize,
+      statusLabel(booking.status),
+      booking.notes || "",
+      booking.code,
+      booking.createdAt || ""
+    ]);
+  });
+  var csv = rows.map(function (row) {
+    return row.map(csvEscape).join(",");
+  }).join("\r\n") + "\r\n";
+  var restaurantSlug = restaurant && restaurant.slug ? restaurant.slug : "restaurant";
+  downloadTextFile(restaurantSlug + "-bookings-" + currentBookingsResult.date + ".csv", csv, "text/csv;charset=utf-8");
+  showToast("Bookings exported.");
 }
 
 function bookingFirstName(booking) {
