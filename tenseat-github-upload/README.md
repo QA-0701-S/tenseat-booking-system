@@ -23,8 +23,9 @@ The dashboard warns the owner to change this default password. Before real use, 
 ## Current Features
 
 - Each restaurant can register, log in, and get its own booking link.
-- New restaurants are held for TenSeat platform approval before they can accept bookings or start billing.
-- TenSeat platform admin can approve, suspend, and restore restaurant accounts from `/platform`.
+- New restaurants can start using TenSeat immediately after registration.
+- TenSeat sends an admin email alert when a new or updated restaurant appears to duplicate an existing name or address.
+- TenSeat platform admin can suspend and restore restaurant accounts from `/platform`.
 - Restaurant owners can request a password reset email from the login page.
 - The root homepage introduces TenSeat and links restaurants to the dashboard login.
 - Public Terms and Privacy Policy pages are available from the homepage footer and registration flow.
@@ -86,6 +87,7 @@ REFERRAL_TRIAL_DAYS=30
 MAX_REFERRAL_CREDITS=12
 PASSWORD_RESET_MINUTES=60
 PLATFORM_ADMIN_PASSWORD=replace-with-a-strong-admin-password
+DUPLICATE_ALERT_EMAIL=optional-admin-alert-recipient
 GMAIL_USER=your-gmail-address@gmail.com
 GMAIL_APP_PASSWORD=your-16-character-google-app-password
 EMAIL_FROM_NAME=TenSeat
@@ -97,7 +99,7 @@ STRIPE_PRO_PRICE_ID=price_pro_monthly_optional
 
 Gmail sending requires a Google App Password. A normal Gmail login password should not be used. Spaces in the App Password are removed automatically.
 
-Password reset emails also use the Gmail SMTP settings. The platform admin page at `/platform` requires `PLATFORM_ADMIN_PASSWORD` to be set in Render.
+Password reset emails and duplicate restaurant alerts use the Gmail SMTP settings. If `DUPLICATE_ALERT_EMAIL` is empty, duplicate alerts are sent to `GMAIL_USER`. The platform admin page at `/platform` requires `PLATFORM_ADMIN_PASSWORD` to be set in Render.
 
 `STRIPE_BASIC_PRICE_ID` and `STRIPE_PRO_PRICE_ID` are optional. If they are empty, the app creates Checkout Sessions with inline A$10/month and A$20/month prices. For a cleaner production Stripe dashboard, create recurring monthly Price IDs in Stripe and add them here.
 

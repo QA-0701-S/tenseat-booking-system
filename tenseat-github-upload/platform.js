@@ -12,8 +12,6 @@ var el = {
   logout: document.getElementById("platformLogoutButton"),
   refresh: document.getElementById("platformRefreshButton"),
   total: document.getElementById("platformTotal"),
-  pending: document.getElementById("platformPending"),
-  approved: document.getElementById("platformApproved"),
   suspended: document.getElementById("platformSuspended"),
   accepting: document.getElementById("platformAccepting"),
   rows: document.getElementById("platformRows"),
@@ -78,8 +76,6 @@ function renderRestaurants() {
   el.rows.textContent = "";
   el.empty.hidden = restaurants.length > 0;
   el.total.textContent = restaurants.length;
-  el.pending.textContent = restaurants.filter(function (restaurant) { return restaurant.approvalStatus === "pending"; }).length;
-  el.approved.textContent = restaurants.filter(function (restaurant) { return restaurant.approvalStatus === "approved"; }).length;
   el.suspended.textContent = restaurants.filter(function (restaurant) { return restaurant.accountStatus === "suspended"; }).length;
   el.accepting.textContent = restaurants.filter(function (restaurant) { return restaurant.acceptingBookings; }).length;
   el.lastUpdated.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -88,7 +84,6 @@ function renderRestaurants() {
     var row = document.createElement("tr");
     row.appendChild(cell(restaurant.name + "\n/r/" + restaurant.slug, "guest-name", "Restaurant"));
     row.appendChild(cell(restaurant.ownerEmail, "booking-email", "Email"));
-    row.appendChild(cell(label(restaurant.approvalStatus), "booking-status " + statusTone(restaurant.approvalStatus), "Approval"));
     row.appendChild(cell(label(restaurant.accountStatus), "booking-status " + statusTone(restaurant.accountStatus), "Account"));
     row.appendChild(cell(planText(restaurant), "", "Plan"));
     row.appendChild(cell(restaurant.acceptingBookings ? "Open" : "Paused", "", "Bookings"));
@@ -113,9 +108,6 @@ function actionsCell(restaurant) {
   td.dataset.label = "Actions";
   var actions = document.createElement("div");
   actions.className = "booking-actions";
-  if (restaurant.approvalStatus !== "approved") {
-    actions.appendChild(actionButton("Approve", "", function () { updateRestaurant(restaurant.id, "approve"); }));
-  }
   if (restaurant.accountStatus !== "suspended") {
     actions.appendChild(actionButton("Suspend", "danger", function () {
       var reason = window.prompt("Reason for suspension", "Paused by TenSeat admin");

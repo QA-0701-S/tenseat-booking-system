@@ -30,6 +30,7 @@ var el = {
   resetError: document.getElementById("resetError"),
   resetBack: document.getElementById("resetBackButton"),
   registerName: document.getElementById("registerName"),
+  registerAddress: document.getElementById("registerAddress"),
   registerEmail: document.getElementById("registerEmail"),
   registerPassword: document.getElementById("registerPassword"),
   registerReferralCode: document.getElementById("registerReferralCode"),
@@ -166,6 +167,7 @@ async function handleRegister(event) {
       method: "POST",
       body: JSON.stringify({
         name: el.registerName.value.trim(),
+        address: el.registerAddress.value.trim(),
         email: el.registerEmail.value.trim(),
         password: el.registerPassword.value,
         referralCode: el.registerReferralCode.value.trim(),
@@ -284,18 +286,6 @@ function applyAccountAlert() {
     el.accountAlertBody.textContent = restaurant.suspendedReason || "This account is paused by TenSeat. New bookings are disabled.";
     return;
   }
-  if (restaurant.approvalStatus === "pending") {
-    el.accountAlert.hidden = false;
-    el.accountAlertTitle.textContent = "Waiting for TenSeat approval";
-    el.accountAlertBody.textContent = "Your booking page is created, but new bookings and billing are paused until TenSeat approves this restaurant.";
-    return;
-  }
-  if (restaurant.approvalStatus === "rejected") {
-    el.accountAlert.hidden = false;
-    el.accountAlertTitle.textContent = "Account not approved";
-    el.accountAlertBody.textContent = "This restaurant account was not approved. New bookings are disabled.";
-    return;
-  }
   el.accountAlert.hidden = true;
 }
 
@@ -325,11 +315,11 @@ function setOwnerBookingFormDisabled(isDisabled) {
 
 function applyBillingButtons() {
   var billing = restaurant.billing || {};
-  if (restaurant.accountStatus === "suspended" || restaurant.approvalStatus === "pending" || restaurant.approvalStatus === "rejected") {
+  if (restaurant.accountStatus === "suspended") {
     el.subscribeBasic.disabled = true;
     el.subscribePro.disabled = true;
     el.manageBilling.disabled = true;
-    el.billingNote.textContent = "Billing is available after TenSeat approves this restaurant account.";
+    el.billingNote.textContent = "Billing is paused while this restaurant account is suspended.";
     return;
   }
   if (billing.billingExempt) {

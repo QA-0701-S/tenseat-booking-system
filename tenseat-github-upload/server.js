@@ -250,6 +250,14 @@ function normalizeGuestText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
+function normalizeDuplicateKey(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
 function normalizePhone(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
@@ -292,9 +300,8 @@ function accountStatusFor(restaurant) {
 }
 
 function restaurantAccountPaused(restaurant) {
-  const approvalStatus = approvalStatusFor(restaurant);
   const accountStatus = accountStatusFor(restaurant);
-  return accountStatus === "suspended" || approvalStatus === "pending" || approvalStatus === "rejected";
+  return accountStatus === "suspended";
 }
 
 function restaurantAcceptsBookings(restaurant) {
@@ -519,6 +526,37 @@ function platformRestaurant(restaurant) {
     trialEndsAt: restaurant.trialEndsAt || "",
     referralCode: restaurant.referralCode || ""
   };
+}
+
+function duplicateRestaurantMatches(restaurants, candidate, excludeId) {
+  const nameKey = normalizeDuplicateKey(candidate.name);
+  const addressKey = normalizeDuplicateKey(candidate.address);
+  return restaurants
+    .filter(function (restaurant) { return restaurant && restaurant.id !== excludeId; })
+    .map(function (restaurant) {
+      const fields = [];
+      if (nameKey && normalizeDuplicateKey(restaurant.name) === nameKey) fields.push("name");
+      if (addressKey && normalizeDuplicateKey(restaurant.address) === addressKey) fields.push("address");
+      return fields.length ? {
+        id: restaurant.id,
+        slug: restaurant.slug,
+        name: restaurant.name,
+        ownerEmail: restaurant.ownerEmail,
+        address: restaurant.address || "",
+        fields: fields
+      } : null;
+    })
+    .filter(Boolean);
+}
+
+function duplicateAlertSignature(restaurant, matches) {
+  return [
+    normalizeDuplicateKey(restaurant.name),
+    normalizeDuplicateKey(restaurant.address),
+    matches.map(function (match) {
+      return match.id + ":" + match.fields.slice().sort().join("+");
+    }).sort().join("|")
+  ].join("::");
 }
 
 async function readArray(file) {
@@ -994,6 +1032,76 @@ async function sendPasswordResetEmail(options) {
   return { sent: true, to: recipient };
 }
 
+function duplicateAlertRecipient() {
+  const config = emailConfig();
+  return normalizeEmail(process.env.DUPLICATE_ALERT_EMAIL || process.env.TENSEAT_ALERT_EMAIL || (config && config.user) || "");
+}
+
+function duplicateRestaurantAlertSubject(restaurant) {
+  return "Possible duplicate restaurant - " + restaurant.name;
+}
+
+function duplicateRestaurantAlertText(options) {
+  const restaurant = options.restaurant;
+  const lines = [
+    "TenSeat found a possible duplicate restaurant.",
+    "",
+    "Trigger: " + options.trigger,
+    "New restaurant: " + restaurant.name,
+    "Owner email: " + restaurant.ownerEmail,
+    "Address: " + (restaurant.address || ""),
+    "Booking page: " + options.baseUrl.replace(/\/$/, "") + "/r/" + restaurant.slug,
+    "Platform: " + options.baseUrl.replace(/\/$/, "") + "/platform",
+    "",
+    "Possible matches:"
+  ];
+  options.matches.forEach(function (match) {
+    lines.push("- " + match.name + " /r/" + match.slug + " (" + match.fields.join(", ") + ") " + match.ownerEmail + " " + (match.address || ""));
+  });
+  lines.push("", "This is only an alert. The new restaurant was not blocked.");
+  return lines.join("\n");
+}
+
+function duplicateRestaurantAlertHtml(options) {
+  const restaurant = options.restaurant;
+  const rows = options.matches.map(function (match) {
+    return "<tr><td>" + escapeHtml(match.name) + "</td><td>/r/" + escapeHtml(match.slug) + "</td><td>" +
+      escapeHtml(match.fields.join(", ")) + "</td><td>" + escapeHtml(match.ownerEmail) + "</td><td>" +
+      escapeHtml(match.address || "") + "</td></tr>";
+  }).join("");
+  const baseUrl = options.baseUrl.replace(/\/$/, "");
+  return "<!doctype html><html><body style=\"margin:0;background:#f5f3ec;color:#18211f;font-family:Arial,sans-serif;\">" +
+    "<div style=\"max-width:760px;margin:0 auto;padding:28px 18px;\">" +
+    "<div style=\"background:#ffffff;border:1px solid #ddd9cd;border-radius:8px;overflow:hidden;\">" +
+    "<div style=\"padding:24px;background:#0a3f35;color:#ffffff;\"><p style=\"margin:0 0 8px;color:#c9952f;font-weight:800;letter-spacing:.08em;text-transform:uppercase;\">Duplicate alert</p>" +
+    "<h1 style=\"margin:0;font-family:Georgia,serif;font-size:28px;\">" + escapeHtml(restaurant.name) + "</h1></div>" +
+    "<div style=\"padding:24px;\"><p style=\"margin:0 0 16px;font-size:16px;line-height:1.5;\">TenSeat found a possible duplicate restaurant. The account was created and was not blocked.</p>" +
+    "<table style=\"width:100%;border-collapse:collapse;margin:0 0 18px;\"><tr><th align=\"left\">Owner email</th><td>" + escapeHtml(restaurant.ownerEmail) + "</td></tr>" +
+    "<tr><th align=\"left\">Address</th><td>" + escapeHtml(restaurant.address || "") + "</td></tr>" +
+    "<tr><th align=\"left\">Trigger</th><td>" + escapeHtml(options.trigger) + "</td></tr></table>" +
+    "<table style=\"width:100%;border-collapse:collapse;margin:0 0 20px;\"><thead><tr><th align=\"left\">Match</th><th align=\"left\">Page</th><th align=\"left\">Reason</th><th align=\"left\">Email</th><th align=\"left\">Address</th></tr></thead><tbody>" + rows + "</tbody></table>" +
+    "<p style=\"margin:0;\"><a href=\"" + escapeHtml(baseUrl + "/platform") + "\" style=\"color:#11644f;font-weight:800;\">Open TenSeat platform admin</a></p>" +
+    "</div></div></div></body></html>";
+}
+
+async function sendDuplicateRestaurantAlert(options) {
+  const matches = Array.isArray(options.matches) ? options.matches : [];
+  if (!matches.length) return emailStatusSkipped("no_duplicates");
+  const config = emailConfig();
+  if (!config) return emailStatusSkipped("gmail_not_configured");
+  const recipient = duplicateAlertRecipient();
+  if (!recipient || !isValidEmail(recipient)) return emailStatusSkipped("invalid_recipient");
+  const transporter = getEmailTransporter();
+  await Promise.race([transporter.sendMail({
+    from: "\"" + config.fromName.replace(/"/g, "") + "\" <" + config.user + ">",
+    to: recipient,
+    subject: duplicateRestaurantAlertSubject(options.restaurant),
+    text: duplicateRestaurantAlertText(options),
+    html: duplicateRestaurantAlertHtml(options)
+  }), timeoutAfter(EMAIL_SEND_TIMEOUT_MS, "Gmail did not respond within " + Math.round(EMAIL_SEND_TIMEOUT_MS / 1000) + " seconds.")]);
+  return { sent: true, to: recipient };
+}
+
 async function findRestaurantBySlug(slug) {
   const restaurants = await readArray(RESTAURANTS_FILE);
   return restaurants.find(function (restaurant) { return restaurant.slug === slug; }) || null;
@@ -1276,7 +1384,7 @@ async function handlePlatformRestaurantAction(request, response, restaurantId) {
   const input = await parseBody(request, response);
   if (!input) return;
   const action = String(input.action || "").trim().toLowerCase();
-  if (!["approve", "suspend", "restore"].includes(action)) {
+  if (!["suspend", "restore"].includes(action)) {
     return sendJson(response, 400, { ok: false, error: "Choose a valid platform action." });
   }
   let updated = null;
@@ -1289,13 +1397,8 @@ async function handlePlatformRestaurantAction(request, response, restaurantId) {
       return;
     }
     const now = new Date().toISOString();
-    if (action === "approve") {
+    if (action === "suspend") {
       restaurant.approvalStatus = "approved";
-      restaurant.accountStatus = "active";
-      restaurant.approvedAt = restaurant.approvedAt || now;
-      restaurant.suspendedAt = "";
-      restaurant.suspendedReason = "";
-    } else if (action === "suspend") {
       restaurant.accountStatus = "suspended";
       restaurant.suspendedAt = now;
       restaurant.suspendedReason = String(input.reason || "Paused by TenSeat admin").trim().slice(0, 180) || "Paused by TenSeat admin";
@@ -1303,7 +1406,7 @@ async function handlePlatformRestaurantAction(request, response, restaurantId) {
       restaurant.accountStatus = "active";
       restaurant.suspendedAt = "";
       restaurant.suspendedReason = "";
-      if (approvalStatusFor(restaurant) === "rejected") restaurant.approvalStatus = "approved";
+      restaurant.approvalStatus = "approved";
       if (!restaurant.approvedAt) restaurant.approvedAt = now;
     }
     restaurant.updatedAt = now;
@@ -1414,9 +1517,13 @@ async function handleRegister(request, response) {
   if (settingsError) return sendJson(response, 400, { ok: false, error: settingsError });
   if (!isValidEmail(email)) return sendJson(response, 400, { ok: false, error: "Enter a valid login email." });
   if (passwordError) return sendJson(response, 400, { ok: false, error: passwordError });
+  const registrationAddress = String(input.address || "").trim().slice(0, 160);
+  if (!registrationAddress) return sendJson(response, 400, { ok: false, error: "Enter the restaurant address." });
+  const registrationMapsQuery = String(input.googleMapsQuery || registrationAddress || settings.name + " restaurant").trim().slice(0, 160);
 
   const passwordFields = await passwordRecord(password);
   let created;
+  let duplicateMatches = [];
   let conflict = "";
   let referralError = "";
   dataWriteQueue = dataWriteQueue.then(async function () {
@@ -1457,7 +1564,12 @@ async function handleRegister(request, response) {
     const existingReferralCodes = new Set(restaurants.map(function (restaurant) {
       return normalizeReferralCode(restaurant.referralCode);
     }).filter(validReferralCode));
+    duplicateMatches = duplicateRestaurantMatches(restaurants, {
+      name: settings.name,
+      address: registrationAddress
+    });
     const appliedTrialDays = referrer ? REFERRAL_TRIAL_DAYS : TRIAL_DAYS;
+    const now = new Date().toISOString();
     created = {
       id: crypto.randomUUID(),
       slug: slug,
@@ -1465,8 +1577,8 @@ async function handleRegister(request, response) {
       ownerEmail: email,
       passwordSalt: passwordFields.passwordSalt,
       passwordHash: passwordFields.passwordHash,
-      address: String(input.address || settings.name).trim().slice(0, 160),
-      googleMapsQuery: String(input.googleMapsQuery || settings.name + " restaurant").trim().slice(0, 160),
+      address: registrationAddress,
+      googleMapsQuery: registrationMapsQuery,
       openingTime: settings.servicePeriods[0].openingTime,
       closingTime: settings.servicePeriods[settings.servicePeriods.length - 1].closingTime,
       servicePeriods: settings.servicePeriods,
@@ -1476,21 +1588,27 @@ async function handleRegister(request, response) {
       stripePlanKey: BILLING_PLANS.basic.key,
       priceMonthly: 10,
       currency: "AUD",
-      approvalStatus: "pending",
+      approvalStatus: "approved",
       accountStatus: "active",
       subscriptionStatus: "trialing",
       mustChangePassword: false,
       trialDays: appliedTrialDays,
       trialEndsAt: trialEndsAt(null, appliedTrialDays),
+      approvedAt: now,
       referralCode: makeReferralCode(existingReferralCodes),
       referredByRestaurantId: referrer ? referrer.id : "",
       referralCodeUsed: referrer ? referrer.referralCode : "",
       referralRewardStatus: referrer ? "pending" : "",
       referralCreditMonths: 0,
       referralRewards: [],
-      termsAcceptedAt: new Date().toISOString(),
+      duplicateAlertSignature: duplicateMatches.length ? duplicateAlertSignature({
+        name: settings.name,
+        address: registrationAddress
+      }, duplicateMatches) : "",
+      duplicateAlertLastAt: duplicateMatches.length ? now : "",
+      termsAcceptedAt: now,
       termsVersion: LEGAL_VERSION,
-      createdAt: new Date().toISOString()
+      createdAt: now
     };
     restaurants.push(created);
     await writeArray(RESTAURANTS_FILE, restaurants);
@@ -1498,6 +1616,16 @@ async function handleRegister(request, response) {
   await dataWriteQueue;
   if (conflict) return sendJson(response, 409, { ok: false, error: conflict });
   if (referralError) return sendJson(response, 400, { ok: false, error: referralError });
+  if (created && duplicateMatches.length) {
+    sendDuplicateRestaurantAlert({
+      restaurant: created,
+      matches: duplicateMatches,
+      trigger: "registration",
+      baseUrl: publicBaseUrl(request)
+    }).catch(function (error) {
+      console.error("Duplicate restaurant alert failed:", error.message);
+    });
+  }
   sendJson(response, 201, { ok: true, token: issueToken(created.id), restaurant: ownerRestaurant(created) });
 }
 
@@ -1533,25 +1661,49 @@ async function handleUpdateRestaurant(request, response) {
   };
   const settingsError = validateRestaurantSettings(settings);
   if (settingsError) return sendJson(response, 400, { ok: false, error: settingsError });
+  const updatedAddress = String(input.address || "").trim().slice(0, 160);
+  if (!updatedAddress) return sendJson(response, 400, { ok: false, error: "Enter the restaurant address." });
+  const updatedMapsQuery = String(input.googleMapsQuery || updatedAddress || settings.name + " restaurant").trim().slice(0, 160);
 
   let updated;
+  let duplicateMatches = [];
+  let shouldSendDuplicateAlert = false;
   dataWriteQueue = dataWriteQueue.then(async function () {
     const restaurants = await readArray(RESTAURANTS_FILE);
     const restaurant = restaurants.find(function (candidate) { return candidate.id === authenticated.id; });
     if (!restaurant) return;
     restaurant.name = settings.name;
-    restaurant.address = String(input.address || settings.name).trim().slice(0, 160);
-    restaurant.googleMapsQuery = String(input.googleMapsQuery || settings.name + " restaurant").trim().slice(0, 160);
+    restaurant.address = updatedAddress;
+    restaurant.googleMapsQuery = updatedMapsQuery;
     restaurant.openingTime = settings.servicePeriods[0].openingTime;
     restaurant.closingTime = settings.servicePeriods[settings.servicePeriods.length - 1].closingTime;
     restaurant.servicePeriods = settings.servicePeriods;
     restaurant.maxPartySize = settings.maxPartySize;
     restaurant.timeSlotCapacity = settings.timeSlotCapacity;
+    duplicateMatches = duplicateRestaurantMatches(restaurants, restaurant, restaurant.id);
+    const signature = duplicateMatches.length ? duplicateAlertSignature(restaurant, duplicateMatches) : "";
+    shouldSendDuplicateAlert = Boolean(signature && signature !== restaurant.duplicateAlertSignature);
+    if (shouldSendDuplicateAlert) {
+      restaurant.duplicateAlertSignature = signature;
+      restaurant.duplicateAlertLastAt = new Date().toISOString();
+    } else if (!signature && restaurant.duplicateAlertSignature) {
+      restaurant.duplicateAlertSignature = "";
+    }
     restaurant.updatedAt = new Date().toISOString();
     updated = restaurant;
     await writeArray(RESTAURANTS_FILE, restaurants);
   });
   await dataWriteQueue;
+  if (updated && shouldSendDuplicateAlert) {
+    sendDuplicateRestaurantAlert({
+      restaurant: updated,
+      matches: duplicateMatches,
+      trigger: "settings update",
+      baseUrl: publicBaseUrl(request)
+    }).catch(function (error) {
+      console.error("Duplicate restaurant alert failed:", error.message);
+    });
+  }
   sendJson(response, 200, { ok: true, restaurant: ownerRestaurant(updated) });
 }
 
@@ -1590,7 +1742,7 @@ async function handleBillingCheckout(request, response) {
   const input = await parseBody(request, response);
   if (!input) return;
   if (restaurantAccountPaused(restaurant)) {
-    return sendJson(response, 403, { ok: false, error: "This restaurant account must be approved by TenSeat before billing can start." });
+    return sendJson(response, 403, { ok: false, error: "This restaurant account is paused by TenSeat." });
   }
   if (restaurant.billingExempt) {
     return sendJson(response, 409, { ok: false, error: "This restaurant has a permanent free account and does not need Stripe billing." });
@@ -2257,7 +2409,7 @@ async function ensureData() {
       restaurant.subscriptionStatus = "trialing";
       restaurantsChanged = true;
     }
-    if (!restaurant.approvalStatus) {
+    if (restaurant.approvalStatus !== "approved") {
       restaurant.approvalStatus = "approved";
       restaurantsChanged = true;
     }
