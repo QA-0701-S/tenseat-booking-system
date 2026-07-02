@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TenSeat Outreach CRM</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <section class="access-shell" id="outreachAccess" aria-labelledby="outreachAccessTitle">
+      <div class="access-panel">
+        <div class="brand-mark" aria-hidden="true">T</div>
+        <p class="eyebrow">TENSEAT ADMIN</p>
+        <h1 id="outreachAccessTitle">Outreach CRM</h1>
+        <form id="outreachLoginForm" class="auth-form">
+          <label class="field compact-field">
+            <span>Admin password</span>
+            <input id="outreachPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <p class="form-error" id="outreachLoginError" role="alert"></p>
+          <button class="primary-button" type="submit">Log in</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="admin-app" id="outreachApp" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark small" aria-hidden="true">T</span>
+          <span class="brand-name">TenSeat</span>
+          <span class="brand-section">Outreach CRM</span>
+        </div>
+        <div class="topbar-actions">
+          <a class="quiet-link" href="/platform">Restaurant Accounts</a>
+          <button class="quiet-button" id="outreachLogoutButton" type="button">Log out</button>
+        </div>
+      </header>
+
+      <div class="dashboard outreach-dashboard">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">LEADS</p>
+            <h1>Restaurant Outreach</h1>
+          </div>
+          <div class="date-controls">
+            <button class="quiet-button" id="showImportButton" type="button">Import CSV</button>
+            <button class="quiet-button" id="refreshLeadsButton" type="button">Refresh</button>
+          </div>
+        </section>
+
+        <section class="summary-band outreach-summary" aria-label="Outreach summary">
+          <div class="metric"><span>Total leads</span><strong id="leadTotal">0</strong></div>
+          <div class="metric"><span>Qualified</span><strong id="leadQualified">0</strong></div>
+          <div class="metric"><span>Follow-ups due</span><strong id="leadFollowUpsDue">0</strong></div>
+          <div class="metric"><span>Do not contact</span><strong id="leadDoNotContact">0</strong></div>
+        </section>
+
+        <section class="bookings-section outreach-import" id="importSection" hidden>
+          <header class="section-header">
+            <div><h2>Import Leads</h2><p id="importSummary">CSV import is ready.</p></div>
+            <button class="quiet-button" id="hideImportButton" type="button">Close</button>
+          </header>
+          <div class="outreach-import-grid">
+            <form id="csvImportForm" class="settings-form">
+              <label class="field compact-field full-field">
+                <span>CSV file</span>
+                <input id="csvFile" type="file" accept=".csv,text/csv" />
+              </label>
+              <label class="field compact-field full-field">
+                <span>Or paste CSV</span>
+                <textarea id="csvText" rows="8" spellcheck="false"></textarea>
+              </label>
+              <button class="primary-button" type="submit">Import CSV</button>
+            </form>
+
+            <form id="singleLeadForm" class="settings-form">
+              <label class="field compact-field"><span>Restaurant name</span><input id="singleName" type="text" maxlength="120" required /></label>
+              <label class="field compact-field"><span>Suburb</span><input id="singleSuburb" type="text" maxlength="80" /></label>
+              <label class="field compact-field"><span>Cuisine</span><input id="singleCuisine" type="text" maxlength="100" /></label>
+              <label class="field compact-field"><span>Email</span><input id="singleEmail" type="email" maxlength="160" /></label>
+              <label class="field compact-field"><span>Phone</span><input id="singlePhone" type="tel" maxlength="40" /></label>
+              <label class="field compact-field"><span>Website</span><input id="singleWebsite" type="url" maxlength="220" /></label>
+              <label class="field compact-field"><span>Instagram</span><input id="singleInstagram" type="text" maxlength="80" /></label>
+              <label class="field compact-field"><span>Source</span><input id="singleSource" type="text" maxlength="80" value="manual" /></label>
+              <button class="primary-button" type="submit">Add Lead</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="bookings-section">
+          <header class="section-header">
+            <div><h2>Lead Pipeline</h2><p id="leadLastUpdated">Not refreshed yet</p></div>
+            <span class="live-status"><i aria-hidden="true"></i>Admin only</span>
+          </header>
+
+          <form class="outreach-filters" id="leadFilters">
+            <label class="field compact-field"><span>Search</span><input id="filterSearch" type="search" /></label>
+            <label class="field compact-field"><span>Status</span><select id="filterStatus"></select></label>
+            <label class="field compact-field"><span>Suburb</span><input id="filterSuburb" type="text" /></label>
+            <label class="field compact-field"><span>Min score</span><input id="filterMinScore" type="number" min="0" max="100" /></label>
+            <label class="field compact-field"><span>Booking link</span><select id="filterBookingLink"><option value="all">All</option><option value="false">No</option><option value="true">Yes</option><option value="unknown">Unknown</option></select></label>
+            <label class="field compact-field"><span>Email</span><select id="filterEmail"><option value="all">All</option><option value="true">Has email</option><option value="false">No email</option></select></label>
+            <label class="field compact-field"><span>Instagram</span><select id="filterInstagram"><option value="all">All</option><option value="true">Has Instagram</option><option value="false">No Instagram</option></select></label>
+            <label class="field compact-field"><span>DNC</span><select id="filterDnc"><option value="all">All</option><option value="false">Contactable</option><option value="true">Do not contact</option></select></label>
+            <label class="field compact-field"><span>Sort</span><select id="filterSort"><option value="score">Score</option><option value="updated">Updated</option><option value="followup">Follow-up</option><option value="name">Name</option></select></label>
+            <button class="quiet-button" type="submit">Apply</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Restaurant</th><th>Suburb</th><th>Rating</th><th>Website</th><th>Email</th><th>Instagram</th><th>Booking</th><th>Score</th><th>Status</th><th>Next follow-up</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="leadRows"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="leadEmpty" hidden>
+            <span class="empty-symbol" aria-hidden="true">&#10003;</span>
+            <h3>No leads found</h3>
+          </div>
+        </section>
+
+        <section class="bookings-section outreach-detail" id="leadDetail" hidden>
+          <header class="section-header">
+            <div><h2 id="detailTitle">Lead details</h2><p id="detailSubtitle">Select a lead to edit.</p></div>
+            <button class="quiet-button" id="closeDetailButton" type="button">Close</button>
+          </header>
+
+          <div class="outreach-detail-grid">
+            <form id="leadEditForm" class="settings-form">
+              <label class="field compact-field"><span>Restaurant name</span><input id="editRestaurantName" type="text" maxlength="120" required /></label>
+              <label class="field compact-field"><span>Contact name</span><input id="editContactName" type="text" maxlength="100" /></label>
+              <label class="field compact-field"><span>Suburb</span><input id="editSuburb" type="text" maxlength="80" /></label>
+              <label class="field compact-field"><span>City</span><input id="editCity" type="text" maxlength="80" /></label>
+              <label class="field compact-field"><span>Cuisine</span><input id="editCuisine" type="text" maxlength="100" /></label>
+              <label class="field compact-field"><span>Phone</span><input id="editPhone" type="tel" maxlength="40" /></label>
+              <label class="field compact-field"><span>Email</span><input id="editEmail" type="email" maxlength="160" /></label>
+              <label class="field compact-field"><span>Website</span><input id="editWebsite" type="url" maxlength="220" /></label>
+              <label class="field compact-field"><span>Instagram</span><input id="editInstagram" type="text" maxlength="80" /></label>
+              <label class="field compact-field"><span>Booking link</span><select id="editBookingLink"><option value="unknown">Unknown</option><option value="false">No</option><option value="true">Yes</option></select></label>
+              <label class="field compact-field"><span>Status</span><select id="editStatus"></select></label>
+              <label class="field compact-field"><span>Next follow-up</span><input id="editNextFollowUp" type="date" /></label>
+              <label class="field compact-field full-field"><span>Notes</span><textarea id="editNotes" rows="4"></textarea></label>
+              <button class="primary-button" type="submit">Save Lead</button>
+            </form>
+
+            <div class="outreach-actions-panel">
+              <div class="lead-score-box">
+                <span>Lead score</span>
+                <strong id="detailScore">0</strong>
+                <small id="detailScoreReason"></small>
+              </div>
+
+              <div class="outreach-action-buttons">
+                <button class="quiet-button" id="emailDraftButton" type="button">Generate Email</button>
+                <button class="quiet-button" id="emailDraftZhButton" type="button">Chinese Email</button>
+                <button class="quiet-button" id="instagramDraftButton" type="button">Instagram DM</button>
+                <button class="quiet-button" id="instagramDraftZhButton" type="button">Chinese DM</button>
+                <button class="quiet-button" id="copyDraftButton" type="button">Copy Draft</button>
+                <button class="quiet-button" id="openInstagramButton" type="button">Open Instagram</button>
+                <button class="quiet-button" id="markInstagramSentButton" type="button">Mark DM Sent</button>
+                <button class="quiet-button" data-status-button="replied" type="button">Replied</button>
+                <button class="quiet-button" data-status-button="demo_booked" type="button">Demo Booked</button>
+                <button class="quiet-button" data-status-button="trial_started" type="button">Trial Started</button>
+                <button class="quiet-button" data-status-button="paid" type="button">Paid</button>
+                <button class="quiet-button" data-status-button="not_interested" type="button">Not Interested</button>
+                <button class="quiet-button danger-button" id="doNotContactButton" type="button">Do Not Contact</button>
+              </div>
+
+              <label class="field compact-field full-field">
+                <span>Draft subject</span>
+                <input id="draftSubject" type="text" readonly />
+              </label>
+              <label class="field compact-field full-field">
+                <span>Draft body</span>
+                <textarea id="draftBody" rows="12" readonly></textarea>
+              </label>
+
+              <form id="noteForm" class="settings-form">
+                <label class="field compact-field full-field"><span>Add note</span><textarea id="noteText" rows="3"></textarea></label>
+                <button class="quiet-button" type="submit">Add Note</button>
+              </form>
+            </div>
+          </div>
+
+          <section class="activity-section">
+            <h3>Activity History</h3>
+            <div id="activityList" class="activity-list"></div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <div class="toast" id="outreachToast" role="status" aria-live="polite"></div>
+    <script src="/outreach.js"></script>
+  </body>
+</html>

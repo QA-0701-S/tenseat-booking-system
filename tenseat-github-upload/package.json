@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check app.js && node --check admin.js && node --check platform.js && node --check scripts/seed-test-data.js",
+    "check": "node --check server.js && node --check app.js && node --check admin.js && node --check platform.js && node --check outreach.js && node --check scripts/seed-test-data.js",
     "seed:test": "node scripts/seed-test-data.js"
   },
   "dependencies": {

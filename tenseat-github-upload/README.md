@@ -12,6 +12,7 @@ npm start
 - Restaurant A guest booking page: `http://127.0.0.1:8795/r/restaurant-a`
 - TenSeat official homepage: `http://127.0.0.1:8795/`
 - Restaurant login and registration: `http://127.0.0.1:8795/owner`
+- TenSeat outreach CRM: `http://127.0.0.1:8795/platform/outreach`
 
 ## Demo Restaurant Account
 
@@ -26,6 +27,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - New restaurants can start using TenSeat immediately after registration.
 - TenSeat sends an admin email alert when a new or updated restaurant appears to duplicate an existing name or address.
 - TenSeat platform admin can suspend and restore restaurant accounts from `/platform`.
+- TenSeat outreach CRM lets the platform admin import restaurant leads, score them, draft English/Chinese outreach, draft Instagram DMs for manual sending, track statuses, add notes, and mark do-not-contact.
 - Restaurant owners can request a password reset email from the login page.
 - The root homepage introduces TenSeat and links restaurants to the dashboard login.
 - Public Terms and Privacy Policy pages are available from the homepage footer and registration flow.
@@ -53,11 +55,14 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Passwords are salted and hashed.
 - Basic rate limits are enabled for login, registration, booking, and cancellation endpoints.
 - Server startup creates backups of `data/restaurants.json` and `data/bookings.json`.
+- Outreach leads and activity logs are stored in `data/leads.json` and `data/outreach-activities.json`.
 - Cloud environment variables are supported: `HOST`, `PORT`, `PUBLIC_ORIGIN`, `SESSION_SECRET`, `TRUST_PROXY`, `DATA_DIR`.
 
 ## Security Notes
 
 - Guest phone numbers are only returned to authenticated restaurant dashboard APIs. Public booking and cancellation responses do not expose phone numbers or internal booking IDs.
+- Outreach CRM is platform-admin only. It does not automate Instagram login or sending, and Phase 1 does not send email automatically.
+- Outreach drafts include a simple opt-out line and do-not-contact leads are blocked from draft generation.
 - Keep `SESSION_SECRET` private and at least 32 characters long.
 - Use HTTPS in production and set `PUBLIC_ORIGIN` to the real website URL.
 - Keep `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` private. Never commit live Stripe keys.

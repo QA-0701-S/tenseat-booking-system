@@ -12,12 +12,14 @@ const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : pat
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
 const RESTAURANTS_FILE = path.join(DATA_DIR, "restaurants.json");
+const LEADS_FILE = path.join(DATA_DIR, "leads.json");
+const OUTREACH_ACTIVITIES_FILE = path.join(DATA_DIR, "outreach-activities.json");
 const SECRET_FILE = path.join(DATA_DIR, ".session-secret");
 const PORT = Number(process.env.PORT || 8795);
 const HOST = process.env.HOST || (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
 const PUBLIC_ORIGIN = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
 const TRUST_PROXY = /^(1|true|yes)$/i.test(String(process.env.TRUST_PROXY || ""));
-const MAX_BODY_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 const TRIAL_DAYS = numberFromEnv("TRIAL_DAYS", 14);
 const REFERRAL_TRIAL_DAYS = numberFromEnv("REFERRAL_TRIAL_DAYS", 30);
@@ -51,7 +53,25 @@ const PUBLIC_FILES = new Map([
   ["/admin.js", ["admin.js", "text/javascript; charset=utf-8"]],
   ["/platform", ["platform.html", "text/html; charset=utf-8"]],
   ["/platform.html", ["platform.html", "text/html; charset=utf-8"]],
-  ["/platform.js", ["platform.js", "text/javascript; charset=utf-8"]]
+  ["/platform.js", ["platform.js", "text/javascript; charset=utf-8"]],
+  ["/outreach.html", ["outreach.html", "text/html; charset=utf-8"]],
+  ["/outreach.js", ["outreach.js", "text/javascript; charset=utf-8"]]
+]);
+const LEAD_STATUSES = new Set([
+  "new",
+  "qualified",
+  "email_drafted",
+  "email_sent",
+  "follow_up_due",
+  "follow_up_sent",
+  "instagram_drafted",
+  "instagram_sent_manually",
+  "replied",
+  "demo_booked",
+  "trial_started",
+  "paid",
+  "not_interested",
+  "do_not_contact"
 ]);
 const BILLING_PLANS = {
   basic: {
@@ -383,6 +403,236 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function normalizeLeadPhone(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "").slice(0, 32);
+}
+
+function normalizeWebsite(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const withProtocol = /^https?:\/\//i.test(text) ? text : "https://" + text;
+  try {
+    const url = new URL(withProtocol);
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return text.slice(0, 220);
+  }
+}
+
+function websiteKey(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(normalizeWebsite(value));
+    return url.hostname.replace(/^www\./i, "").toLowerCase() + url.pathname.replace(/\/$/, "").toLowerCase();
+  } catch {
+    return normalizeDuplicateKey(value);
+  }
+}
+
+function normalizeInstagramHandle(value) {
+  let text = String(value || "").trim();
+  text = text.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "");
+  text = text.replace(/^instagram\.com\//i, "");
+  text = text.replace(/^@/, "");
+  text = text.split(/[/?#]/)[0];
+  return text.replace(/[^A-Za-z0-9._]/g, "").slice(0, 80);
+}
+
+function boolFromInput(value) {
+  if (typeof value === "boolean") return value;
+  const text = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "y"].includes(text)) return true;
+  if (["0", "false", "no", "n"].includes(text)) return false;
+  return undefined;
+}
+
+function bookingLinkState(value) {
+  const parsed = boolFromInput(value);
+  if (parsed === true) return true;
+  if (parsed === false) return false;
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "unknown" || text === "") return "unknown";
+  return "unknown";
+}
+
+function leadText(value, maxLength) {
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLength || 220);
+}
+
+function leadNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function isLikelyChain(name) {
+  const key = normalizeDuplicateKey(name);
+  return [
+    "mcdonald",
+    "kfc",
+    "subway",
+    "hungry jack",
+    "domino",
+    "pizza hut",
+    "red rooster",
+    "nando",
+    "grilld",
+    "zambrero",
+    "guzman y gomez"
+  ].some(function (brand) { return key.includes(brand); });
+}
+
+function scoreLead(input) {
+  const lead = input || {};
+  let score = 0;
+  const reasons = [];
+  function add(points, reason) {
+    score += points;
+    reasons.push((points > 0 ? "+" : "") + points + " " + reason);
+  }
+  if (lead.hasBookingLink === false) add(30, "no booking link found");
+  if (lead.hasPhone) add(10, "has phone");
+  if (lead.hasWebsite) add(10, "has website");
+  if (lead.hasInstagram) add(10, "has Instagram");
+  if (lead.hasEmail) add(15, "has email");
+  if (Number(lead.googleRating) >= 4.2) add(15, "Google rating >= 4.2");
+  if (Number(lead.googleReviewCount) >= 50) add(15, "Google reviews >= 50");
+  if (!isLikelyChain(lead.restaurantName)) add(10, "appears independent");
+  if (lead.suburb) add(10, "has target suburb");
+  if (/\b(dinner|restaurant|bistro|izakaya|bbq|hotpot|dumpling|sushi|noodle|thai|korean|chinese|vietnamese|japanese)\b/i.test(lead.cuisineType + " " + lead.restaurantName)) {
+    add(10, "reservation-friendly venue");
+  }
+  const bookingProvider = /opentable|nowbookit|now book it|resdiary|sevenrooms|quandoo|thefork|fork|tablenest/i.test(
+    [lead.website, lead.notes, lead.leadScoreReason].join(" ")
+  );
+  if (bookingProvider) add(-25, "already appears to use a booking platform");
+  if (isLikelyChain(lead.restaurantName)) add(-20, "large chain brand");
+  if (!lead.hasPhone && !lead.hasWebsite && !lead.hasEmail && !lead.hasInstagram) add(-20, "few contact channels");
+  if (Number(lead.googleRating) > 0 && Number(lead.googleRating) < 3.8) add(-10, "rating below 3.8");
+  if (/permanently closed|closed permanently/i.test(lead.notes || "")) add(-100, "appears permanently closed");
+  return {
+    leadScore: Math.max(0, Math.min(100, score)),
+    leadScoreReason: reasons.join("; ")
+  };
+}
+
+function normalizeLead(input, existing) {
+  const now = new Date().toISOString();
+  const lead = existing ? { ...existing } : {};
+  lead.id = lead.id || crypto.randomUUID();
+  lead.restaurantName = leadText(input.restaurantName || input.name || lead.restaurantName, 120);
+  lead.contactName = leadText(input.contactName || lead.contactName, 100);
+  lead.suburb = leadText(input.suburb || lead.suburb, 80);
+  lead.city = leadText(input.city || lead.city || "Adelaide", 80);
+  lead.state = leadText(input.state || lead.state || "SA", 40);
+  lead.country = leadText(input.country || lead.country || "Australia", 80);
+  lead.cuisineType = leadText(input.cuisineType || input.cuisine || lead.cuisineType, 100);
+  lead.phone = normalizeLeadPhone(input.phone || lead.phone);
+  lead.email = normalizeEmail(input.email || lead.email).slice(0, 160);
+  lead.website = normalizeWebsite(input.website || lead.website);
+  lead.instagramHandle = normalizeInstagramHandle(input.instagramHandle || input.instagram || lead.instagramHandle);
+  lead.googleMapsUrl = leadText(input.googleMapsUrl || input.googleMapsURL || lead.googleMapsUrl, 500);
+  lead.googleRating = leadNumber(input.googleRating || lead.googleRating);
+  lead.googleReviewCount = Math.max(0, Math.round(leadNumber(input.googleReviewCount || lead.googleReviewCount)));
+  lead.address = leadText(input.address || lead.address, 220);
+  lead.hasWebsite = Boolean(lead.website);
+  lead.hasInstagram = Boolean(lead.instagramHandle);
+  lead.hasEmail = Boolean(lead.email);
+  lead.hasPhone = Boolean(lead.phone);
+  lead.hasBookingLink = Object.prototype.hasOwnProperty.call(input, "hasBookingLink")
+    ? bookingLinkState(input.hasBookingLink)
+    : (Object.prototype.hasOwnProperty.call(lead, "hasBookingLink") ? lead.hasBookingLink : "unknown");
+  lead.source = leadText(input.source || lead.source || "manual", 80);
+  lead.status = LEAD_STATUSES.has(String(input.status || lead.status || "new")) ? String(input.status || lead.status || "new") : "new";
+  lead.notes = leadText(input.notes || lead.notes, 2000);
+  lead.lastContactedAt = leadText(input.lastContactedAt || lead.lastContactedAt, 40);
+  lead.nextFollowUpAt = leadText(input.nextFollowUpAt || lead.nextFollowUpAt, 40);
+  lead.emailSendCount = Math.max(0, Math.round(leadNumber(input.emailSendCount || lead.emailSendCount)));
+  lead.instagramDmGeneratedAt = leadText(input.instagramDmGeneratedAt || lead.instagramDmGeneratedAt, 40);
+  lead.instagramDmSentManuallyAt = leadText(input.instagramDmSentManuallyAt || lead.instagramDmSentManuallyAt, 40);
+  lead.doNotContact = Boolean(boolFromInput(input.doNotContact) === true || lead.doNotContact);
+  lead.doNotContactReason = leadText(input.doNotContactReason || lead.doNotContactReason, 220);
+  lead.referredByCode = normalizeReferralCode(input.referredByCode || lead.referredByCode);
+  lead.demoLink = leadText(input.demoLink || lead.demoLink, 500);
+  if (lead.doNotContact) lead.status = lead.status === "not_interested" ? "not_interested" : "do_not_contact";
+  const score = scoreLead(lead);
+  lead.leadScore = score.leadScore;
+  lead.leadScoreReason = score.leadScoreReason;
+  if (lead.leadScore >= 60 && lead.status === "new") lead.status = "qualified";
+  lead.createdAt = lead.createdAt || now;
+  lead.updatedAt = now;
+  return lead;
+}
+
+function leadDuplicateReasons(lead, existing) {
+  const reasons = [];
+  const nameMatch = normalizeDuplicateKey(lead.restaurantName) &&
+    normalizeDuplicateKey(lead.restaurantName) === normalizeDuplicateKey(existing.restaurantName) &&
+    normalizeDuplicateKey(lead.suburb) &&
+    normalizeDuplicateKey(lead.suburb) === normalizeDuplicateKey(existing.suburb);
+  if (nameMatch) reasons.push("restaurant name + suburb");
+  if (lead.email && existing.email && normalizeEmail(lead.email) === normalizeEmail(existing.email)) reasons.push("email");
+  if (lead.phone && existing.phone && normalizeLeadPhone(lead.phone) === normalizeLeadPhone(existing.phone)) reasons.push("phone");
+  if (lead.website && existing.website && websiteKey(lead.website) === websiteKey(existing.website)) reasons.push("website");
+  if (lead.googleMapsUrl && existing.googleMapsUrl && normalizeDuplicateKey(lead.googleMapsUrl) === normalizeDuplicateKey(existing.googleMapsUrl)) reasons.push("Google Maps URL");
+  return reasons;
+}
+
+function findDuplicateLead(lead, leads, excludeId) {
+  for (const existing of leads) {
+    if (excludeId && existing.id === excludeId) continue;
+    const reasons = leadDuplicateReasons(lead, existing);
+    if (reasons.length) return { lead: existing, reasons: reasons };
+  }
+  return null;
+}
+
+function publicLead(lead) {
+  return {
+    id: lead.id,
+    restaurantName: lead.restaurantName,
+    contactName: lead.contactName || "",
+    suburb: lead.suburb || "",
+    city: lead.city || "",
+    state: lead.state || "",
+    country: lead.country || "",
+    cuisineType: lead.cuisineType || "",
+    phone: lead.phone || "",
+    email: lead.email || "",
+    website: lead.website || "",
+    instagramHandle: lead.instagramHandle || "",
+    googleMapsUrl: lead.googleMapsUrl || "",
+    googleRating: Number(lead.googleRating || 0),
+    googleReviewCount: Number(lead.googleReviewCount || 0),
+    address: lead.address || "",
+    hasWebsite: Boolean(lead.hasWebsite),
+    hasBookingLink: lead.hasBookingLink === true ? true : lead.hasBookingLink === false ? false : "unknown",
+    hasInstagram: Boolean(lead.hasInstagram),
+    hasEmail: Boolean(lead.hasEmail),
+    hasPhone: Boolean(lead.hasPhone),
+    leadScore: Number(lead.leadScore || 0),
+    leadScoreReason: lead.leadScoreReason || "",
+    source: lead.source || "",
+    status: lead.status || "new",
+    notes: lead.notes || "",
+    lastContactedAt: lead.lastContactedAt || "",
+    nextFollowUpAt: lead.nextFollowUpAt || "",
+    emailSendCount: Number(lead.emailSendCount || 0),
+    instagramDmGeneratedAt: lead.instagramDmGeneratedAt || "",
+    instagramDmSentManuallyAt: lead.instagramDmSentManuallyAt || "",
+    doNotContact: Boolean(lead.doNotContact),
+    doNotContactReason: lead.doNotContactReason || "",
+    referredByCode: lead.referredByCode || "",
+    demoLink: lead.demoLink || "",
+    createdAt: lead.createdAt || "",
+    updatedAt: lead.updatedAt || ""
+  };
+}
+
 function makeSlug(value) {
   const slug = String(value || "")
     .normalize("NFKD")
@@ -580,10 +830,227 @@ async function writeArray(file, value) {
   await fs.rename(temporary, file);
 }
 
+function parseCsvLine(line) {
+  const values = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (quoted) {
+      if (char === "\"" && line[index + 1] === "\"") {
+        current += "\"";
+        index += 1;
+      } else if (char === "\"") {
+        quoted = false;
+      } else {
+        current += char;
+      }
+    } else if (char === "\"") {
+      quoted = true;
+    } else if (char === ",") {
+      values.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  values.push(current);
+  return values.map(function (value) { return value.trim(); });
+}
+
+function parseCsv(text) {
+  const lines = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter(function (line) {
+    return line.trim();
+  });
+  if (!lines.length) return { headers: [], rows: [] };
+  const headers = parseCsvLine(lines[0]).map(function (header) {
+    return header.trim();
+  });
+  const rows = lines.slice(1).map(function (line, rowIndex) {
+    const values = parseCsvLine(line);
+    const row = { _rowNumber: rowIndex + 2 };
+    headers.forEach(function (header, index) {
+      row[header] = values[index] || "";
+    });
+    return row;
+  });
+  return { headers: headers, rows: rows };
+}
+
+function csvValue(row, names) {
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(row, name)) return row[name];
+  }
+  const lowered = Object.keys(row).reduce(function (map, key) {
+    map[key.toLowerCase()] = row[key];
+    return map;
+  }, {});
+  for (const name of names) {
+    const value = lowered[String(name).toLowerCase()];
+    if (value != null) return value;
+  }
+  return "";
+}
+
+function leadFromCsvRow(row) {
+  return {
+    restaurantName: csvValue(row, ["restaurantName", "restaurant name", "name"]),
+    contactName: csvValue(row, ["contactName", "contact name"]),
+    suburb: csvValue(row, ["suburb"]),
+    city: csvValue(row, ["city"]),
+    state: csvValue(row, ["state"]),
+    country: csvValue(row, ["country"]),
+    cuisineType: csvValue(row, ["cuisineType", "cuisine type", "cuisine"]),
+    phone: csvValue(row, ["phone", "phoneNumber", "phone number"]),
+    email: csvValue(row, ["email"]),
+    website: csvValue(row, ["website", "url"]),
+    instagramHandle: csvValue(row, ["instagramHandle", "instagram handle", "instagram"]),
+    googleMapsUrl: csvValue(row, ["googleMapsUrl", "google maps url", "googleMapsURL"]),
+    googleRating: csvValue(row, ["googleRating", "google rating", "rating"]),
+    googleReviewCount: csvValue(row, ["googleReviewCount", "google review count", "reviewCount", "reviews"]),
+    address: csvValue(row, ["address"]),
+    hasBookingLink: csvValue(row, ["hasBookingLink", "has booking link", "bookingLink"]),
+    notes: csvValue(row, ["notes"]),
+    source: csvValue(row, ["source"]) || "csv"
+  };
+}
+
+function appendOutreachActivity(activities, activity) {
+  const created = {
+    id: crypto.randomUUID(),
+    leadId: activity.leadId,
+    type: activity.type,
+    subject: leadText(activity.subject, 240),
+    body: String(activity.body || "").slice(0, 8000),
+    channel: leadText(activity.channel, 40),
+    status: leadText(activity.status || "logged", 40),
+    providerMessageId: leadText(activity.providerMessageId, 200),
+    errorMessage: leadText(activity.errorMessage, 500),
+    createdBy: leadText(activity.createdBy || "platform_admin", 80),
+    createdAt: new Date().toISOString()
+  };
+  activities.push(created);
+  return created;
+}
+
+function publicActivity(activity) {
+  return {
+    id: activity.id,
+    leadId: activity.leadId,
+    type: activity.type,
+    subject: activity.subject || "",
+    body: activity.body || "",
+    channel: activity.channel || "",
+    status: activity.status || "",
+    providerMessageId: activity.providerMessageId || "",
+    errorMessage: activity.errorMessage || "",
+    createdBy: activity.createdBy || "",
+    createdAt: activity.createdAt || ""
+  };
+}
+
+function personalObservation(lead) {
+  if (lead.hasWebsite && lead.hasBookingLink === false) return "I could not see a simple direct booking link on your website";
+  if (lead.hasInstagram && lead.hasBookingLink !== true) return "your Instagram looks active, but I could not see a direct booking link";
+  if (lead.hasPhone && !lead.hasWebsite) return "your restaurant appears to rely mainly on phone bookings";
+  if (lead.googleMapsUrl && lead.hasBookingLink !== true) return "your Google profile looks active, but I could not see a simple booking option";
+  return "your restaurant looks like a good fit for a simple online booking link";
+}
+
+function englishEmailDraft(lead) {
+  const subject = "Simple booking link for " + lead.restaurantName;
+  const body = [
+    "Hi " + (lead.contactName || lead.restaurantName + " team") + ",",
+    "",
+    "I am building TenSeat, a simple online booking link for small restaurants.",
+    "",
+    "I noticed " + personalObservation(lead) + ".",
+    "",
+    "TenSeat lets customers book from Google, Instagram, your website, or a QR code. Your team can manage bookings in a simple dashboard, and you can still add phone bookings manually.",
+    "",
+    "There is no commission and no complicated setup. I can help set up your restaurant page, opening hours, and booking limits.",
+    "",
+    "I am offering a free trial for a few local restaurants. After that, it is A$20/month only if you find it useful.",
+    "",
+    "Would you be open to seeing a quick demo?",
+    "",
+    "If this is not relevant, just reply \"no thanks\" and I will not contact you again.",
+    "",
+    "Kind regards,",
+    "Lee"
+  ].join("\n");
+  return { subject: subject, body: body, channel: "email", language: "en" };
+}
+
+function chineseEmailDraft(lead) {
+  const subject = lead.restaurantName + " 的线上订位页面";
+  const body = [
+    "你好 " + lead.restaurantName + " 团队，",
+    "",
+    "我做了一个给小餐厅用的线上订位系统 TenSeat。",
+    "",
+    "客人可以从 Google、Instagram、网站或二维码直接订位，餐厅后台可以看到每天的预约。员工也可以手动添加电话订位，不需要再完全依赖纸本记录。",
+    "",
+    "TenSeat 没有抽佣，也不复杂，我可以帮你设置好餐厅页面、营业时间和订位人数限制。",
+    "",
+    "现在我在找几家本地餐厅免费试用。试用后如果觉得有用，再 A$20/月继续使用。",
+    "",
+    "你方便看一个简单 demo 吗？",
+    "",
+    "如果不合适，回复“不需要”即可，我不会再打扰。",
+    "",
+    "Lee"
+  ].join("\n");
+  return { subject: subject, body: body, channel: "email", language: "zh" };
+}
+
+function englishInstagramDraft(lead) {
+  return {
+    subject: "",
+    channel: "instagram",
+    language: "en",
+    body: [
+      "Hi " + lead.restaurantName + ", I am building TenSeat, a simple booking link for small restaurants.",
+      "",
+      "Customers can book from Google, Instagram, your website, or a QR code, and you can manage bookings in a simple dashboard.",
+      "",
+      "No commission, simple setup, and I can help set it up for you.",
+      "",
+      "I am offering a free trial for a few local restaurants, then A$20/month only if it helps.",
+      "",
+      "Would you like to see a quick demo?"
+    ].join("\n")
+  };
+}
+
+function chineseInstagramDraft(lead) {
+  return {
+    subject: "",
+    channel: "instagram",
+    language: "zh",
+    body: [
+      "你好，我做了一个给小餐厅用的线上订位系统 TenSeat。",
+      "",
+      "客人可以从 Google、Instagram、网站或二维码直接订位，餐厅后台可以看到每天预约。没有抽佣，也不复杂，我可以帮你设置好。",
+      "",
+      "现在可以免费试用，之后如果觉得有用，再 A$20/月继续使用。",
+      "",
+      "你方便看一个简单 demo 吗？"
+    ].join("\n")
+  };
+}
+
+function draftForLead(lead, input) {
+  const channel = String(input.channel || input.type || "email").toLowerCase();
+  const language = String(input.language || "en").toLowerCase();
+  if (channel === "instagram") return language === "zh" ? chineseInstagramDraft(lead) : englishInstagramDraft(lead);
+  return language === "zh" ? chineseEmailDraft(lead) : englishEmailDraft(lead);
+}
+
 async function createStartupBackup() {
   await fs.mkdir(BACKUP_DIR, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  for (const file of [RESTAURANTS_FILE, BOOKINGS_FILE]) {
+  for (const file of [RESTAURANTS_FILE, BOOKINGS_FILE, LEADS_FILE, OUTREACH_ACTIVITIES_FILE]) {
     if (await fileExists(file)) {
       const parsed = path.parse(file);
       await fs.copyFile(file, path.join(BACKUP_DIR, parsed.name + "-" + timestamp + parsed.ext));
@@ -1359,6 +1826,259 @@ async function applyReferralRewardForInvoice(invoice) {
   return persistReferralReward(candidate, stripeCredit);
 }
 
+function filterOutreachLeads(leads, requestUrl) {
+  const status = String(requestUrl.searchParams.get("status") || "all");
+  const suburb = normalizeDuplicateKey(requestUrl.searchParams.get("suburb") || "");
+  const search = normalizeDuplicateKey(requestUrl.searchParams.get("search") || "");
+  const minScoreText = requestUrl.searchParams.get("minScore");
+  const maxScoreText = requestUrl.searchParams.get("maxScore");
+  const minScore = minScoreText == null || minScoreText === "" ? null : Number(minScoreText);
+  const maxScore = maxScoreText == null || maxScoreText === "" ? null : Number(maxScoreText);
+  const hasBookingLink = String(requestUrl.searchParams.get("hasBookingLink") || "all");
+  const hasEmail = String(requestUrl.searchParams.get("hasEmail") || "all");
+  const hasInstagram = String(requestUrl.searchParams.get("hasInstagram") || "all");
+  const doNotContact = String(requestUrl.searchParams.get("doNotContact") || "all");
+  const sort = String(requestUrl.searchParams.get("sort") || "score").toLowerCase();
+
+  let filtered = leads.filter(function (lead) {
+    if (status !== "all" && lead.status !== status) return false;
+    if (suburb && !normalizeDuplicateKey(lead.suburb).includes(suburb)) return false;
+    if (Number.isFinite(minScore) && lead.leadScore < minScore) return false;
+    if (Number.isFinite(maxScore) && lead.leadScore > maxScore) return false;
+    if (hasBookingLink !== "all" && String(lead.hasBookingLink) !== hasBookingLink) return false;
+    if (hasEmail !== "all" && String(Boolean(lead.hasEmail)) !== hasEmail) return false;
+    if (hasInstagram !== "all" && String(Boolean(lead.hasInstagram)) !== hasInstagram) return false;
+    if (doNotContact !== "all" && String(Boolean(lead.doNotContact)) !== doNotContact) return false;
+    if (search) {
+      const haystack = normalizeDuplicateKey([
+        lead.restaurantName,
+        lead.suburb,
+        lead.city,
+        lead.email,
+        lead.phone,
+        lead.instagramHandle,
+        lead.website
+      ].join(" "));
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+
+  filtered = filtered.sort(function (left, right) {
+    if (sort === "name") return String(left.restaurantName).localeCompare(String(right.restaurantName));
+    if (sort === "updated") return String(right.updatedAt).localeCompare(String(left.updatedAt));
+    if (sort === "followup") return String(left.nextFollowUpAt || "9999").localeCompare(String(right.nextFollowUpAt || "9999"));
+    return Number(right.leadScore || 0) - Number(left.leadScore || 0);
+  });
+  return filtered;
+}
+
+async function handleOutreachLeads(request, response, requestUrl) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  if (request.method === "GET") {
+    const leads = (await readArray(LEADS_FILE)).map(function (lead) { return normalizeLead(lead, lead); });
+    const filtered = filterOutreachLeads(leads, requestUrl);
+    return sendJson(response, 200, {
+      ok: true,
+      leads: filtered.map(publicLead),
+      summary: {
+        total: leads.length,
+        filtered: filtered.length,
+        qualified: leads.filter(function (lead) { return Number(lead.leadScore) >= 60; }).length,
+        doNotContact: leads.filter(function (lead) { return lead.doNotContact; }).length,
+        followUpsDue: leads.filter(function (lead) {
+          return lead.nextFollowUpAt && lead.nextFollowUpAt <= localDateString(new Date()) && !lead.doNotContact;
+        }).length
+      }
+    });
+  }
+
+  if (request.method !== "POST") return sendJson(response, 405, { ok: false, error: "Method not allowed." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const normalized = normalizeLead(input);
+  if (!normalized.restaurantName) return sendJson(response, 400, { ok: false, error: "Restaurant name is required." });
+  let created = null;
+  let duplicate = null;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const leads = await readArray(LEADS_FILE);
+    duplicate = findDuplicateLead(normalized, leads);
+    if (duplicate) return;
+    leads.push(normalized);
+    created = normalized;
+    await writeArray(LEADS_FILE, leads);
+  });
+  await dataWriteQueue;
+  if (duplicate) return sendJson(response, 409, { ok: false, error: "This lead looks like a duplicate.", duplicate: { lead: publicLead(duplicate.lead), reasons: duplicate.reasons } });
+  sendJson(response, 201, { ok: true, lead: publicLead(created) });
+}
+
+async function handleOutreachLead(request, response, leadId) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  if (request.method === "GET") {
+    const leads = await readArray(LEADS_FILE);
+    const lead = leads.find(function (candidate) { return candidate.id === leadId; });
+    if (!lead) return sendJson(response, 404, { ok: false, error: "Lead not found." });
+    const activities = (await readArray(OUTREACH_ACTIVITIES_FILE))
+      .filter(function (activity) { return activity.leadId === leadId; })
+      .sort(function (left, right) { return String(right.createdAt).localeCompare(String(left.createdAt)); });
+    return sendJson(response, 200, { ok: true, lead: publicLead(normalizeLead(lead, lead)), activities: activities.map(publicActivity) });
+  }
+
+  if (request.method !== "PATCH") return sendJson(response, 405, { ok: false, error: "Method not allowed." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  let updated = null;
+  let missing = false;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const leads = await readArray(LEADS_FILE);
+    const activities = await readArray(OUTREACH_ACTIVITIES_FILE);
+    const index = leads.findIndex(function (candidate) { return candidate.id === leadId; });
+    if (index < 0) {
+      missing = true;
+      return;
+    }
+    const before = leads[index];
+    const next = normalizeLead({ ...before, ...input }, before);
+    if (input.doNotContact === true) {
+      next.doNotContact = true;
+      next.doNotContactReason = leadText(input.doNotContactReason || next.doNotContactReason || "Marked by TenSeat admin", 220);
+      next.status = "do_not_contact";
+      appendOutreachActivity(activities, { leadId: leadId, type: "do_not_contact_set", channel: "internal", status: "logged", body: next.doNotContactReason });
+    }
+    if (input.noteToAdd) {
+      next.notes = leadText((next.notes ? next.notes + "\n" : "") + new Date().toISOString().slice(0, 10) + ": " + input.noteToAdd, 2000);
+      appendOutreachActivity(activities, { leadId: leadId, type: "note_added", channel: "internal", status: "logged", body: input.noteToAdd });
+    }
+    if (input.status && input.status !== before.status) {
+      appendOutreachActivity(activities, { leadId: leadId, type: "status_changed", channel: "internal", status: "logged", body: before.status + " -> " + next.status });
+    }
+    leads[index] = next;
+    updated = next;
+    await writeArray(LEADS_FILE, leads);
+    await writeArray(OUTREACH_ACTIVITIES_FILE, activities);
+  });
+  await dataWriteQueue;
+  if (missing) return sendJson(response, 404, { ok: false, error: "Lead not found." });
+  sendJson(response, 200, { ok: true, lead: publicLead(updated) });
+}
+
+async function handleOutreachImport(request, response) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  const parsed = parseCsv(input.csvText || "");
+  if (!parsed.headers.length) return sendJson(response, 400, { ok: false, error: "CSV file is empty." });
+  const summary = { created: 0, skipped: 0, duplicates: [], errors: [] };
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const leads = await readArray(LEADS_FILE);
+    parsed.rows.forEach(function (row) {
+      const raw = leadFromCsvRow(row);
+      const normalized = normalizeLead(raw);
+      if (!normalized.restaurantName) {
+        summary.errors.push({ row: row._rowNumber, error: "Missing restaurantName." });
+        summary.skipped += 1;
+        return;
+      }
+      const duplicate = findDuplicateLead(normalized, leads);
+      if (duplicate) {
+        summary.duplicates.push({
+          row: row._rowNumber,
+          restaurantName: normalized.restaurantName,
+          existingLeadId: duplicate.lead.id,
+          reasons: duplicate.reasons
+        });
+        summary.skipped += 1;
+        return;
+      }
+      leads.push(normalized);
+      summary.created += 1;
+    });
+    await writeArray(LEADS_FILE, leads);
+  });
+  await dataWriteQueue;
+  sendJson(response, 200, { ok: true, summary: summary });
+}
+
+async function handleOutreachDraft(request, response, leadId) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  let draft = null;
+  let updated = null;
+  let missing = false;
+  let blocked = false;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const leads = await readArray(LEADS_FILE);
+    const activities = await readArray(OUTREACH_ACTIVITIES_FILE);
+    const lead = leads.find(function (candidate) { return candidate.id === leadId; });
+    if (!lead) {
+      missing = true;
+      return;
+    }
+    if (lead.doNotContact) {
+      blocked = true;
+      return;
+    }
+    const normalized = normalizeLead(lead, lead);
+    draft = draftForLead(normalized, input);
+    if (draft.channel === "instagram") {
+      normalized.status = "instagram_drafted";
+      normalized.instagramDmGeneratedAt = new Date().toISOString();
+      appendOutreachActivity(activities, { leadId: leadId, type: "instagram_dm_drafted", channel: "instagram", status: "drafted", body: draft.body });
+    } else {
+      normalized.status = "email_drafted";
+      appendOutreachActivity(activities, { leadId: leadId, type: "email_drafted", subject: draft.subject, channel: "email", status: "drafted", body: draft.body });
+    }
+    normalized.updatedAt = new Date().toISOString();
+    const index = leads.findIndex(function (candidate) { return candidate.id === leadId; });
+    leads[index] = normalized;
+    updated = normalized;
+    await writeArray(LEADS_FILE, leads);
+    await writeArray(OUTREACH_ACTIVITIES_FILE, activities);
+  });
+  await dataWriteQueue;
+  if (missing) return sendJson(response, 404, { ok: false, error: "Lead not found." });
+  if (blocked) return sendJson(response, 409, { ok: false, error: "This lead is marked do not contact." });
+  sendJson(response, 200, { ok: true, draft: draft, lead: publicLead(updated) });
+}
+
+async function handleOutreachActivity(request, response, leadId) {
+  if (!authenticatedPlatform(request)) return sendJson(response, 401, { ok: false, error: "Please log in again." });
+  const input = await parseBody(request, response);
+  if (!input) return;
+  let updated = null;
+  let activity = null;
+  let missing = false;
+  dataWriteQueue = dataWriteQueue.then(async function () {
+    const leads = await readArray(LEADS_FILE);
+    const activities = await readArray(OUTREACH_ACTIVITIES_FILE);
+    const lead = leads.find(function (candidate) { return candidate.id === leadId; });
+    if (!lead) {
+      missing = true;
+      return;
+    }
+    const type = leadText(input.type || "note_added", 80);
+    if (type === "instagram_dm_copied") {
+      activity = appendOutreachActivity(activities, { leadId: leadId, type: type, channel: "instagram", status: "copied", body: input.body || "" });
+    } else if (type === "instagram_dm_sent_manually") {
+      lead.status = "instagram_sent_manually";
+      lead.instagramDmSentManuallyAt = new Date().toISOString();
+      lead.lastContactedAt = lead.instagramDmSentManuallyAt;
+      activity = appendOutreachActivity(activities, { leadId: leadId, type: type, channel: "instagram", status: "sent_manually", body: input.body || "" });
+    } else {
+      activity = appendOutreachActivity(activities, { leadId: leadId, type: type, channel: input.channel || "internal", status: input.status || "logged", subject: input.subject || "", body: input.body || "" });
+    }
+    lead.updatedAt = new Date().toISOString();
+    updated = lead;
+    await writeArray(LEADS_FILE, leads);
+    await writeArray(OUTREACH_ACTIVITIES_FILE, activities);
+  });
+  await dataWriteQueue;
+  if (missing) return sendJson(response, 404, { ok: false, error: "Lead not found." });
+  sendJson(response, 200, { ok: true, lead: publicLead(updated), activity: publicActivity(activity) });
+}
+
 async function handlePlatformLogin(request, response) {
   const input = await parseBody(request, response);
   if (!input) return;
@@ -2107,6 +2827,9 @@ async function servePublicFile(request, response, pathname) {
   if (!publicFile && /^\/r\/[a-z0-9-]+\/?$/.test(pathname)) {
     publicFile = ["index.html", "text/html; charset=utf-8"];
   }
+  if (!publicFile && /^\/(?:platform|admin)\/outreach(?:\/.*)?$/.test(pathname)) {
+    publicFile = ["outreach.html", "text/html; charset=utf-8"];
+  }
   if (!publicFile) {
     response.writeHead(404);
     response.end("Not found");
@@ -2153,6 +2876,9 @@ async function route(request, response) {
   const restaurantMatch = pathname.match(/^\/api\/restaurants\/([a-z0-9-]+)(?:\/(bookings|cancel))?$/);
   const ownerBookingMatch = pathname.match(/^\/api\/owner\/bookings\/([A-Z0-9-]+)$/i);
   const platformRestaurantMatch = pathname.match(/^\/api\/platform\/restaurants\/([A-Za-z0-9_-]+)$/);
+  const outreachLeadMatch = pathname.match(/^\/api\/platform\/outreach\/leads\/([A-Za-z0-9_-]+)$/);
+  const outreachDraftMatch = pathname.match(/^\/api\/platform\/outreach\/leads\/([A-Za-z0-9_-]+)\/draft$/);
+  const outreachActivityMatch = pathname.match(/^\/api\/platform\/outreach\/leads\/([A-Za-z0-9_-]+)\/activity$/);
 
   if (request.method === "POST" && pathname === "/api/stripe/webhook") return handleStripeWebhook(request, response);
   if (pathname.startsWith("/api/") && enforceRateLimit(request, response, "api", RATE_LIMIT_RULES.api)) return;
@@ -2180,6 +2906,11 @@ async function route(request, response) {
     if (enforceRateLimit(request, response, "auth", RATE_LIMIT_RULES.auth)) return;
     return handlePlatformLogin(request, response);
   }
+  if (pathname === "/api/platform/outreach/leads") return handleOutreachLeads(request, response, requestUrl);
+  if (pathname === "/api/platform/outreach/import" && request.method === "POST") return handleOutreachImport(request, response);
+  if (outreachDraftMatch && request.method === "POST") return handleOutreachDraft(request, response, outreachDraftMatch[1]);
+  if (outreachActivityMatch && request.method === "POST") return handleOutreachActivity(request, response, outreachActivityMatch[1]);
+  if (outreachLeadMatch) return handleOutreachLead(request, response, outreachLeadMatch[1]);
   if (request.method === "GET" && pathname === "/api/platform/restaurants") return handlePlatformRestaurants(request, response);
   if (request.method === "PATCH" && platformRestaurantMatch) return handlePlatformRestaurantAction(request, response, platformRestaurantMatch[1]);
   if (request.method === "GET" && pathname === "/api/owner/me") return handleOwnerMe(request, response);
@@ -2477,6 +3208,8 @@ async function ensureData() {
     }
   });
   if (changed || !(await fileExists(BOOKINGS_FILE))) await writeArray(BOOKINGS_FILE, bookings);
+  if (!(await fileExists(LEADS_FILE))) await writeArray(LEADS_FILE, []);
+  if (!(await fileExists(OUTREACH_ACTIVITIES_FILE))) await writeArray(OUTREACH_ACTIVITIES_FILE, []);
 }
 
 async function fileExists(file) {

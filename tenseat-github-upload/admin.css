@@ -733,6 +733,128 @@ tbody tr:hover {
   line-height: 1.35;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.outreach-dashboard {
+  gap: 22px;
+}
+
+.outreach-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.outreach-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+  align-items: end;
+}
+
+.outreach-import-grid,
+.outreach-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr);
+  gap: 22px;
+}
+
+.outreach-actions-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.lead-score-box {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfaf6;
+}
+
+.lead-score-box span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lead-score-box strong {
+  color: var(--green);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.lead-score-box small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.lead-score-pill {
+  display: inline-grid;
+  min-width: 38px;
+  min-height: 30px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e8f2ed;
+  color: var(--green);
+  font-weight: 900;
+}
+
+.outreach-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.danger-button {
+  border-color: rgba(198, 95, 61, .45);
+  color: var(--coral);
+}
+
+.activity-section {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.activity-section h3 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-item {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.activity-item strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.activity-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .table-action {
   min-height: 30px;
   padding: 0 8px;
@@ -1133,7 +1255,10 @@ tbody tr:hover {
   .password-form,
   .billing-panel,
   .referral-panel,
-  .owner-booking-form {
+  .owner-booking-form,
+  .outreach-filters,
+  .outreach-import-grid,
+  .outreach-detail-grid {
     grid-template-columns: 1fr;
   }
 
