@@ -39,6 +39,7 @@ The dashboard warns the owner to change this default password. Before real use, 
 - Capacity at the same exact time is configurable, and the system blocks overbooking.
 - Guests receive an on-screen booking code and are prompted to copy it.
 - If Gmail SMTP is configured and the guest enters an email address, TenSeat sends a booking confirmation email.
+- If Gmail SMTP is configured, TenSeat also emails the restaurant owner when a customer creates a booking.
 - Guests can cancel by booking code.
 - The restaurant dashboard shows bookings, guest count, phone number, email, notes, cancelled bookings, no-shows, and booking codes.
 - Restaurant staff can add manual phone or walk-in bookings.
@@ -102,7 +103,7 @@ STRIPE_BASIC_PRICE_ID=price_basic_monthly_optional
 STRIPE_PRO_PRICE_ID=price_pro_monthly_optional
 ```
 
-Gmail sending requires a Google App Password. A normal Gmail login password should not be used. Spaces in the App Password are removed automatically.
+Gmail sending requires a Google App Password. A normal Gmail login password should not be used. Spaces in the App Password are removed automatically. The same Gmail settings send guest booking confirmations, restaurant-owner new booking notifications, password resets, and duplicate restaurant alerts.
 
 Password reset emails and duplicate restaurant alerts use the Gmail SMTP settings. If `DUPLICATE_ALERT_EMAIL` is empty, duplicate alerts are sent to `GMAIL_USER`. The platform admin page at `/platform` requires `PLATFORM_ADMIN_PASSWORD` to be set in Render.
 
