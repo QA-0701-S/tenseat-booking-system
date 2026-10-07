@@ -1333,6 +1333,14 @@ function emailStatusSkipped(reason) {
   return { sent: false, skipped: true, reason: reason };
 }
 
+function publicEmailStatus(status) {
+  return {
+    sent: Boolean(status && status.sent),
+    skipped: Boolean(status && status.skipped),
+    reason: status && status.reason ? status.reason : undefined
+  };
+}
+
 function getEmailTransporter() {
   const config = emailConfig();
   if (!config) return null;
@@ -1458,6 +1466,79 @@ async function sendBookingConfirmationEmail(options) {
     text: bookingConfirmationText(options.restaurant, options.booking, links),
     html: bookingConfirmationHtml(options.restaurant, options.booking, links)
   }), timeoutAfter(EMAIL_SEND_TIMEOUT_MS, "Gmail did not respond within " + Math.round(EMAIL_SEND_TIMEOUT_MS / 1000) + " seconds.")]);
+  return { sent: true, to: recipient };
+}
+
+function restaurantBookingNotificationSubject(restaurant, booking) {
+  return "New booking - " + restaurant.name + " - " + booking.date + " " + booking.time;
+}
+
+function restaurantBookingNotificationText(options) {
+  const restaurant = options.restaurant;
+  const booking = options.booking;
+  const dashboardUrl = options.baseUrl.replace(/\/$/, "") + "/owner";
+  return [
+    "A new TenSeat booking was received.",
+    "",
+    "Restaurant: " + restaurant.name,
+    "Guest: " + bookingDisplayName(booking),
+    "Phone: " + (booking.phone || "Not provided"),
+    "Email: " + (booking.email || "Not provided"),
+    "Date: " + booking.date,
+    "Time: " + booking.time,
+    "Party size: " + booking.partySize,
+    "Notes: " + (booking.notes || "None"),
+    "Booking code: " + booking.code,
+    "",
+    "Open dashboard: " + dashboardUrl
+  ].join("\n");
+}
+
+function restaurantBookingNotificationHtml(options) {
+  const restaurant = options.restaurant;
+  const booking = options.booking;
+  const dashboardUrl = options.baseUrl.replace(/\/$/, "") + "/owner";
+  const rows = [
+    ["Guest", bookingDisplayName(booking)],
+    ["Phone", booking.phone || "Not provided"],
+    ["Email", booking.email || "Not provided"],
+    ["Date", booking.date],
+    ["Time", booking.time],
+    ["Party size", booking.partySize],
+    ["Notes", booking.notes || "None"],
+    ["Booking code", booking.code]
+  ].map(function (row) {
+    return "<tr><th align=\"left\" style=\"padding:8px 10px;border-bottom:1px solid #ebe6d8;\">" + escapeHtml(row[0]) +
+      "</th><td style=\"padding:8px 10px;border-bottom:1px solid #ebe6d8;\">" + escapeHtml(row[1]) + "</td></tr>";
+  }).join("");
+
+  return "<!doctype html><html><body style=\"margin:0;background:#f5f3ec;color:#18211f;font-family:Arial,sans-serif;\">" +
+    "<div style=\"max-width:620px;margin:0 auto;padding:28px 18px;\">" +
+    "<div style=\"background:#ffffff;border:1px solid #ddd9cd;border-radius:8px;overflow:hidden;\">" +
+    "<div style=\"padding:24px;background:#0a3f35;color:#ffffff;\"><p style=\"margin:0 0 8px;color:#c9952f;font-weight:800;letter-spacing:.08em;text-transform:uppercase;\">New booking</p>" +
+    "<h1 style=\"margin:0;font-family:Georgia,serif;font-size:32px;\">" + escapeHtml(restaurant.name) + "</h1></div>" +
+    "<div style=\"padding:24px;\"><p style=\"margin:0 0 18px;font-size:16px;line-height:1.5;\">A new customer booking was received in TenSeat.</p>" +
+    "<table style=\"width:100%;border-collapse:collapse;margin:0 0 20px;\">" + rows + "</table>" +
+    "<p style=\"margin:0;\"><a href=\"" + escapeHtml(dashboardUrl) + "\" style=\"display:inline-block;padding:12px 16px;border-radius:6px;background:#11644f;color:#ffffff;font-weight:800;text-decoration:none;\">Open TenSeat dashboard</a></p>" +
+    "</div></div></div></body></html>";
+}
+
+async function sendRestaurantBookingNotificationEmail(options) {
+  const recipient = normalizeEmail(options.to || (options.restaurant && options.restaurant.ownerEmail));
+  if (!recipient || !isValidEmail(recipient)) return emailStatusSkipped("invalid_recipient");
+  const config = emailConfig();
+  if (!config) return emailStatusSkipped("gmail_not_configured");
+  const transporter = getEmailTransporter();
+  const guestEmail = normalizeGuestEmail(options.booking && options.booking.email);
+  const message = {
+    from: "\"" + config.fromName.replace(/"/g, "") + "\" <" + config.user + ">",
+    to: recipient,
+    subject: restaurantBookingNotificationSubject(options.restaurant, options.booking),
+    text: restaurantBookingNotificationText(options),
+    html: restaurantBookingNotificationHtml(options)
+  };
+  if (guestEmail && isValidEmail(guestEmail)) message.replyTo = guestEmail;
+  await Promise.race([transporter.sendMail(message), timeoutAfter(EMAIL_SEND_TIMEOUT_MS, "Gmail did not respond within " + Math.round(EMAIL_SEND_TIMEOUT_MS / 1000) + " seconds.")]);
   return { sent: true, to: recipient };
 }
 
@@ -2679,7 +2760,24 @@ async function handleCreateBooking(request, response, restaurant) {
     console.error("Booking email failed:", error.message);
     emailStatus = { sent: false, skipped: false, reason: "send_failed" };
   }
-  sendJson(response, 201, { ok: true, booking: publicBookingResponse(booking), email: emailStatus });
+  let restaurantEmailStatus = emailStatusSkipped("gmail_not_configured");
+  try {
+    restaurantEmailStatus = await sendRestaurantBookingNotificationEmail({
+      to: restaurant.ownerEmail,
+      restaurant: restaurant,
+      booking: booking,
+      baseUrl: publicBaseUrl(request)
+    });
+  } catch (error) {
+    console.error("Restaurant booking notification email failed:", error.message);
+    restaurantEmailStatus = { sent: false, skipped: false, reason: "send_failed" };
+  }
+  sendJson(response, 201, {
+    ok: true,
+    booking: publicBookingResponse(booking),
+    email: emailStatus,
+    restaurantEmail: publicEmailStatus(restaurantEmailStatus)
+  });
 }
 
 async function handleCancelBooking(request, response, restaurant) {
