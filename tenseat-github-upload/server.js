@@ -4,6 +4,9 @@ const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
+const dns = require("dns");
+const net = require("net");
+const tls = require("tls");
 const nodemailer = require("nodemailer");
 const Stripe = require("stripe");
 
@@ -1341,20 +1344,65 @@ function publicEmailStatus(status) {
   };
 }
 
+function connectSmtpSocketIpv4(host, port, secure, callback) {
+  const addresses = net.isIP(host) ? [host] : null;
+
+  function connectTo(addressList, lastError) {
+    const address = addressList.shift();
+    if (!address) return callback(lastError || new Error("No IPv4 SMTP address found for " + host + "."));
+
+    let settled = false;
+    const socket = secure
+      ? tls.connect({ host: address, port: port, servername: host })
+      : net.connect({ host: address, port: port });
+    const timeout = setTimeout(function () {
+      if (!settled) socket.destroy(new Error("SMTP IPv4 connection timeout."));
+    }, EMAIL_CONNECT_TIMEOUT_MS);
+
+    function settle(error, result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      socket.removeListener("error", handleError);
+      socket.removeListener(secure ? "secureConnect" : "connect", handleConnect);
+      if (error) return connectTo(addressList, error);
+      callback(null, result);
+    }
+
+    function handleError(error) {
+      settle(error);
+    }
+
+    function handleConnect() {
+      settle(null, { connection: socket, secured: secure });
+    }
+
+    socket.once("error", handleError);
+    socket.once(secure ? "secureConnect" : "connect", handleConnect);
+  }
+
+  if (addresses) return connectTo(addresses.slice());
+  dns.resolve4(host, function (error, resolvedAddresses) {
+    if (error) return callback(error);
+    connectTo((resolvedAddresses || []).slice());
+  });
+}
+
 function getEmailTransporter() {
   const config = emailConfig();
   if (!config) return null;
   const host = String(process.env.GMAIL_SMTP_HOST || "smtp.gmail.com").trim() || "smtp.gmail.com";
   const port = numberFromEnv("GMAIL_SMTP_PORT", 465);
-  const family = 4;
-  const key = [config.user, config.appPassword, host, port, family].join(":");
+  const key = [config.user, config.appPassword, host, port, "ipv4-socket"].join(":");
   if (!emailTransporter || emailTransporterKey !== key) {
     emailTransporter = nodemailer.createTransport({
       host: host,
       port: port,
-      family: family,
       secure: port === 465,
       requireTLS: port !== 465,
+      getSocket: function (options, callback) {
+        connectSmtpSocketIpv4(host, port, port === 465, callback);
+      },
       auth: {
         user: config.user,
         pass: config.appPassword
